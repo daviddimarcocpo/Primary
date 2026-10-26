@@ -1,0 +1,48 @@
+TUBE JOB HELPER 0.1
+
+1. Extract the entire ZIP to a folder on your Windows programming computer.
+2. Double-click Start Helper.cmd.
+3. Start with Assembly Beam2.stp, quantity 10, stock 240 inches, and job name:
+   CODEX TEST 10262026 SQ6X25
+4. Click Create job. This makes new folders and copies the CAD; it does not
+   change your original file or reuse your previous output folder.
+5. Open Tube Design. Click Import working copy in the helper. Check whether
+   the correct part loads. If it stops or Windows blocks it, share the error.
+   Do not disable security settings or run the old probe scripts.
+
+This first version assists the work; it does not run the full process alone.
+You still confirm the profile/material, assign marking, export TEOX, operate
+Auto Run, and nest/export as shown in your recording. The helper guides those
+steps and checks/collects the final named PDF and TPC.
+
+The Import and Identify desktop controls need their first test on your Windows
+computer. Automated file checks passed against your uploaded sample, including
+rejected wrong quantities, parts, machine target, and part-only TPC files.
+
+In Auto Run, keep the job multiplier (Amount) at 1 and enter the requested
+per-part quantities in Min. and Max. Review stock length and compatible
+material/profile grouping. Recalculate after edits.
+
+Before collecting files, review the actual Production Package PDF and nest.
+The helper checks the PDF's filename/signature, not its printed contents.
+It checks TPC job/part/quantity/machine metadata; it does not simulate cutting
+or certify a program as ready to run. Use your normal TRUMPF simulation and
+operator release process before production. It never sends a job to the laser.
+
+Results: Documents\Tube Laser Jobs\[your unique job folder]
+  originals      Retained input copies
+  work           CAD working copies and per-part exports
+  generated      Export your final named PDF/TPC here
+  deliverables   Collected checked pairs, checks.json, and REVIEW.txt
+  diagnostics    Reports for troubleshooting local desktop actions
+
+To continue later, open the helper and choose Resume saved job. Select job.json
+inside your job folder. Do not move that folder between sessions.
+
+No Python installation, passwords, API authorization, or remote access is
+required. The helper makes no network connections and does not change global
+Windows execution policy. The launcher requests RemoteSigned for its own
+PowerShell process. Managed policy or unsigned-download restrictions may block
+it; report that message rather than changing your system policy.
+
+See README.md and VALIDATION.md for details, known limits, and development tests.
