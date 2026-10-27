@@ -2,7 +2,7 @@
 
 A local Windows assistant for preparing TRUMPF tube-laser jobs and collecting the **Production Package PDF and nested TPC**. Built around the supplied Tube Design 17 / Programming Tube Auto Run 7.0.1 demonstration for TruLaser Tube 7000 (T12).
 
-**Version 0.1.4 is an assisted workflow, not unattended CAD-to-machine programming.** It does not require a TRUMPF API license. Its Import and Identify commands use ordinary visible Tube Design controls and still require a first test on the programming workstation. Auto Run, nesting, contour selection, and export remain guided operator actions in this release. No simulation, machine operation, network transfer, or USB copy is performed.
+**Version 0.2.0 is an assisted workflow, not unattended CAD-to-machine programming.** It does not require a TRUMPF API license. Its Import and Identify commands use ordinary visible Tube Design controls and still require a first test on the programming workstation. Auto Run file submission and fresh calculation-output checks are assisted automatically after you open its + dialog. Machine selection, contour selection, nesting, and final export remain operator actions. No simulation, machine operation, network transfer, or USB copy is performed.
 
 ## First run
 
@@ -28,7 +28,7 @@ This addresses the observed missing-button lookup; live command behavior still n
 
 **Prepare job** accepts STEP/STP/SLDPRT files, quantities, a job name, and stock length in inches. The default 240-inch stock is visible and editable, not inferred from the CAD. A fresh timestamp/ID folder is created for every new run. To continue after closing, choose **Resume saved job** and select that run's `job.json`; keep the job folder at its original location.
 
-**Design and program** provides experimental **Import working copy** and **Identify profile** commands. You select/confirm the body, material, profile, dimensions, and direction. You assign and confirm cutting/marking contours. Save the SLDPRT and export a fresh, same-name TEOX into the part's working folder. Register that TEOX, open Auto Run, copy the TEOX path, and import it with the `+` button. Wait for calculation and inspect errors/warnings. Repeat for each part. One separately manufactured part per input CAD file is supported; multi-body assemblies need separate preparation.
+**Design and program** provides experimental **Import working copy** and **Identify profile** commands. You select/confirm the body, material, profile, dimensions, and direction. You assign and confirm cutting/marking contours. Save the SLDPRT and export a fresh, same-name TEOX into the part's working folder. Register that TEOX. In Auto Run select the Auto Run tab and T12 machine, open the `+` import dialog, then click **Import TEOX in Auto Run** in the helper. It fills and submits the registered file and watches for fresh calculation outputs. Inspect the green check and errors/warnings yourself before nesting. Copy/paste remains available as a manual fallback. Repeat for each part. One separately manufactured part per input CAD file is supported; multi-body assemblies need separate preparation.
 
 **Nest and check outputs** lists exact part quantities and the requested stock length. In Auto Run select those parts, enter nesting, set each part's Min./Max. quantities, keep the job multiplier/Amount at 1, and review compatible material/profile groupings. Set the exact job name, recalculate, review the nest, and keep TRUMPF's default of exporting the final named TPC and Production Package PDF beside the input TEOX. Select those two files directly from that input folder in the helper; no relocation is required. The pickers start beside the registered TEOX, and the PDF picker follows the selected TPC folder. Open and review the PDF, acknowledge the review, and choose **Check and collect package**.
 
@@ -46,7 +46,7 @@ These checks **do not establish** collision clearance, correct technology settin
 
 - Keep one visible Tube Design window. Run the helper and TRUMPF in the same Windows user/session, normally without administrator elevation.
 - **Import/Identify** may stop if a dialog is open, Windows rejects foreground activation, or controls differ from the recorded installation. Inspect TRUMPF before retrying; a timed-out request may already have reached the application. Only the worker is terminated on a 15-second timeout; TRUMPF is left running.
-- Use **Save control report** for a new local diagnostic. It records Tube Design/Auto Run control names and IDs only, capped at 1,000 entries and depth 6. No desktop screenshots, unrelated window enumeration, credentials, or network connections are collected. Review the report before sharing; names may contain job information.
+- Use **Save control report** for a new local diagnostic. It records Tube Design/Auto Run control names and IDs only, capped at 5,000 lines and depth 14, including help text and supported automation patterns. No desktop screenshots, unrelated window enumeration, credentials, or network connections are collected. Review the report before sharing; names may contain job information.
 - Runtime files are in your run folder: `job.json`, `helper.log`, `diagnostics`, generated files, and deliverables. Source code and unrelated user files are not modified.
 
 ## Developer validation
@@ -57,7 +57,9 @@ The core runs under PowerShell without Windows desktop assemblies. Supply the th
 pwsh -NoProfile -File tests/Test-Core.ps1 `
   -ReferenceTpc 'C:\samples\CODEX TEST 10262026 SQ6X25.tpc' `
   -ReferencePdf 'C:\samples\CODEX TEST 10262026 SQ6X25.pdf' `
-  -ReferenceCad 'C:\samples\Assembly Beam2.stp'
+  -ReferenceCad 'C:\samples\Assembly Beam2.stp' `
+  -ReferenceTubx 'C:\samples\Assembly Beam2.tubx' `
+  -ReferenceTeox 'C:\samples\Assembly Beam2.teox'
 ```
 
 The suite parses all helper PowerShell files and exercises the actual TPC/PDF pair, expected identities/quantities, rejected mismatches, malformed inputs, collection hashes, source preservation, isolated job staging, and resume validation. It does not launch Windows Forms or validate live TRUMPF behavior. See `VALIDATION.md` for the run result and remaining acceptance work.
@@ -73,3 +75,13 @@ TRUMPF retains its normal save-beside-input behavior throughout the workflow. Th
 The helper compares both selected file basenames with its own saved job name, then checks the job identity inside the TPC. The output tab now displays both expected filenames, and a mismatch error includes the helper name and actual selected filenames. Select the named final job PDF/TPC, rather than the individual part report.
 
 If the helper name was entered incorrectly while preparing the job, choose Change helper job name on the output tab. Enter the intended nested job name exactly. This saves the corrected helper metadata without renaming the job folder, CAD, exports, or TPC contents. It clears previous package approval and PDF acknowledgement, so review and checks must be repeated. A different job, part quantity, machine, or internal TPC job identity still fails validation. Package-check errors are also written to helper.log.
+
+## Auto Run import and output watch in 0.2.0
+
+Resume an existing job with a registered TEOX. Use the Auto Run tab, select TruLaser Tube 7000 (T12), and open its + dialog. Leave that dialog open and click Import TEOX in Auto Run in the helper. The helper checks the tab selection, selected machine, specific import-dialog title/process, unique filename/Open controls, foreground window, and a visible duplicate-part guard. It fills the registered path and posts the normal Open-button action; it does not guess the unlabeled + button. If current accessibility data cannot verify these conditions, it stops and asks for a control report. This new handoff requires its first local Windows test.
+
+After submission, a receipt records the input path/hash, request time, and existing output fingerprints. The two-second UI timer watches for same-name part TPC/TUBX/PDF files beside the TEOX, for up to two minutes. Previous cached files do not count, including unchanged files within timestamp tolerance. It checks part program identity, T12 target, agreement of TPC/TUBX profile, TUBX reported errors, PDF signature, and unchanged hashes during inspection. The TUBX XML parser prohibits DTDs and external resolution. Only the individual-part stage permits part-only TPCs; final collection still requires a nested-job header with the expected quantities.
+
+OutputsVerified means fresh and consistent exported part metadata; it does **not** certify the Auto Run UI green check, warning-free processing, PDF contents, collision clearance, or correct toolpaths. Inspect those through the usual TRUMPF workflow before nesting and release. An unreadable/growing output remains Pending; explicit part/machine/profile/error mismatches are Failed. Timeouts and Stop watching leave TRUMPF running without deleting or moving its files. Check calculation outputs can resume watching the recorded request later. Closing the helper stops the timer; its receipt remains in job.json. Re-registering the TEOX or withdrawing profile/marking approval clears its earlier calculation receipt.
+
+The current older control report does not identify an unambiguous + button. Deeper reports include HelpText, patterns, and offscreen state so a future iteration can map that control based on evidence. No blind coordinates or speculative command-line/API interfaces are used.

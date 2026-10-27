@@ -1,4 +1,4 @@
-# Version 0.1.4 validation
+# Version 0.2.0 validation
 
 ## Reference evidence
 
@@ -15,7 +15,7 @@ User-supplied STEP, recorded two-minute manual workflow, final TPC, and Producti
 
 Core and syntax tests run using official PowerShell 7.4.6 for Linux. Its download was checked against the release's official SHA-256 manifest. This tests the PowerShell core against the actual supplied files, but is not a Windows PowerShell 5.1 runtime test. The helper uses PowerShell 5.1-compatible syntax and Windows built-in assemblies.
 
-**51 checks passed**, including starter-shortcut routing regressions, compilation of the native Win32 adapter, and tests that reject missing/hidden/disabled commands or a wrong process/toolbar identity. The test transcript is included as `TEST RESULTS.txt` in the helper ZIP. Release file checksums are included as `SHA256SUMS.txt`. No test result should be interpreted as a live desktop or machine test.
+**69 checks passed**, including starter-shortcut routing regressions, compilation of the native Win32 adapter, and tests that reject missing/hidden/disabled commands or a wrong process/toolbar identity. The test transcript is included as `TEST RESULTS.txt` in the helper ZIP. Release file checksums are included as `SHA256SUMS.txt`. No test result should be interpreted as a live desktop or machine test.
 
 ## Local acceptance still required
 
@@ -26,7 +26,7 @@ Core and syntax tests run using official PowerShell 7.4.6 for Linux. Its downloa
 5. Export a new named PDF/TPC pair, review the PDF and nest, and run Check and collect package.
 6. Complete the shop's normal simulation and operator release. No machine operation has been tested from this environment.
 
-Auto Run control automation beyond guided steps is not implemented in this release. A new application-control report can support the next iteration without retrying licensed API calls.
+The new Auto Run file-chooser handoff and calculation-output watch are implemented but require local Windows acceptance. Opening + and selecting the machine remain operator actions.
 
 ## Startup correction
 
@@ -45,3 +45,9 @@ Output guidance and pickers now follow TRUMPF's default input-folder save behavi
 ## Filename mismatch diagnosis and correction
 
 Mismatch messages now identify the saved helper name, expected filenames, and selected filenames. The existing wrong-PDF-name test verifies those diagnostic values. Three additional checks cover saving a corrected helper name while preserving the job directory and staged CAD, clearing earlier package approval, and rejecting invalid names. The Windows input dialog and label rendering remain subject to local verification. No filename or TPC content is changed by correcting the helper's name.
+
+## Auto Run stage validation
+
+Eighteen added checks cover the handoff context, real uploaded TUBX metadata, fresh output acceptance, rejection of stale/missing/changed input files, unchanged pre-request outputs even within timestamp tolerance, wrong part/machine/profile, nested TPC at the individual-part stage, reported TUBX processing errors, prohibited XML DTDs, and incomplete files. These checks use temporary copies of the supplied TEOX/TUBX and program content from the supplied TPC; temporary test programs are not distributed as production outputs. PDF contents are not validated by the watcher.
+
+The previous assisted package collection and folder contents were confirmed by the user on the workstation. Identify profile opening was also confirmed. This does not establish that the new Auto Run controls work: verify the tab/machine/chooser selectors, file submission, normal TRUMPF calculation, output watcher timer, and stop/timeout behavior locally. No live Windows automation ran in the cloud tests.

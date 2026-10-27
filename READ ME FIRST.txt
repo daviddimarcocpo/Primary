@@ -1,72 +1,46 @@
-TUBE JOB HELPER 0.1.4
+TUBE JOB HELPER 0.2.0
 
-1. On the downloaded ZIP, use Properties > Unblock if shown. Extract the entire
-   ZIP into a new folder. This unblocks only this package, not system policy.
-2. Double-click Start Helper.cmd.
-3. Start with Assembly Beam2.stp, quantity 10, stock 240 inches, and job name:
-   CODEX TEST 10262026 SQ6X25
-4. Click Create job. This makes new folders and copies the CAD; it does not
-   change your original file or reuse your previous output folder.
-5. Save work and close any previously started Tube Design instance normally.
-   Open Tube Design using its usual TRUMPF shortcut, or the updated helper
-   button. The helper now uses the installed shortcut, never sldworks directly.
-   Click Import working copy in the helper. Check whether
-   the correct part loads. If it stops or Windows blocks it, share the error.
-   Do not disable security settings or run the old probe scripts.
+NEW TEST: AUTO RUN FILE IMPORT AND CALCULATION OUTPUT WATCH
 
-This first version assists the work; it does not run the full process alone.
-You still confirm the profile/material, assign marking, export TEOX, operate
-Auto Run, and nest/export as shown in your recording. The helper guides those
-steps and checks/collects the final named PDF and TPC.
+1. Download from your GitHub repository. Unblock the ZIP in Properties if shown,
+   extract into a new folder, and launch Start Helper.cmd.
+2. Resume saved job and choose the existing job.json. Keep your CAD/exports where
+   they are. Select Assembly Beam2, whose TEOX is already registered.
+3. Open Auto Run's Auto Run tab and select TruLaser Tube 7000 (T12). Use a queue
+   that does not already contain this test part. Existing saved nests/files do
+   not need to be removed. The helper will stop if it detects a duplicate row.
+4. Click + in Auto Run. Leave Select TEOX files for import open.
+5. Click Import TEOX in Auto Run in the helper. It verifies the context, enters
+   the registered path and requests Open, then watches fresh part TPC/TUBX/PDF
+   outputs beside that TEOX. Leave TRUMPF's default output location unchanged.
+6. Read the status. OutputsVerified means fresh matching output metadata, not
+   a machine-ready program. Inspect Auto Run's green check and warnings yourself.
 
-The Import and Identify desktop controls need their first test on your Windows
-computer. Automated file checks passed against your uploaded sample, including
-rejected wrong quantities, parts, machine target, and part-only TPC files.
+The new handoff is not yet verified on your Windows workstation. If it stops,
+leave the Auto Run dialog open and use Save control report. Reports now include
+more detail and deeper controls; review them before sharing.
 
-In Auto Run, keep the job multiplier (Amount) at 1 and enter the requested
-per-part quantities in Min. and Max. Review stock length and compatible
-material/profile grouping. Recalculate after edits.
+Check calculation outputs resumes watching a recorded request. Stop watching
+and a two-minute timeout stop only the helper's watch, not TRUMPF. If TRUMPF
+asks a question or shows an error, inspect it yourself; the helper does not
+answer unexpected dialogs or select cutting/marking technology for you.
 
-Before collecting files, review the actual Production Package PDF and nest.
-The helper checks the PDF's filename/signature, not its printed contents.
-It checks TPC job/part/quantity/machine metadata; it does not simulate cutting
-or certify a program as ready to run. Use your normal TRUMPF simulation and
-operator release process before production. It never sends a job to the laser.
+Profile/material confirmation and marking remain your steps. Nesting and final
+export remain as before. After calculation, use the existing Nest and check
+outputs tab. Use the same helper job name as the intended named nest. Keep the
+PDF/TPC beside the TEOX; there is no generated-folder requirement. Review the
+PDF and run Check and collect package. A checked copy is placed in deliverables.
+Complete your usual TRUMPF simulation and operator release before production.
 
-Results: Documents\Tube Laser Jobs\[your unique job folder]
-  originals      Retained input copies
-  work           CAD working copies and TRUMPF outputs beside each input
-  deliverables   Collected checked pairs, checks.json, and REVIEW.txt
-  diagnostics    Reports for troubleshooting local desktop actions
+Existing features retained:
+- Original CAD is retained; work on the staged working copy.
+- Open Tube Design uses its installed shortcut, never direct sldworks startup.
+- Import/Identify have native-toolbar fallback and privilege checks.
+- Change helper job name corrects helper metadata without moving/renaming files.
+- Resume saved job retains parts, TEOX paths, and metadata.
+- No passwords, API authorization, Python install, or network connection needed.
+- No automatic USB transfer or machine operation.
 
-To continue later, open the helper and choose Resume saved job. Select job.json
-inside your job folder. Do not move that folder between sessions.
-
-No Python installation, passwords, API authorization, or remote access is
-required. The helper makes no network connections and does not change global
-Windows execution policy. The launcher requests RemoteSigned for its own
-PowerShell process. Managed policy or unsigned-download restrictions may block
-it; report that message rather than changing your system policy.
-
-See README.md and VALIDATION.md for details, known limits, and development tests.
-
-UPDATE 0.1.2: Import and Identify can now query the native toolbar when Windows
-exposes no accessible button controls. Missing, hidden, disabled or ambiguous
-commands still stop without dispatch. Reports include Windows privilege levels
-and native command state. The helper does not elevate itself automatically.
-
-For the next test, keep the manually imported sample visible in a normally
-started Tube Design. Open the updated helper, Resume saved job, and choose its
-job.json. Select Assembly Beam2 and try Identify profile. If it opens, confirm
-the profile manually as usual. If it stops, save and share a new control report.
-
-UPDATE 0.1.3: Keep all TRUMPF default output locations beside the input files.
-The helper's final TPC/PDF pickers start in the TEOX folder. Select those native
-outputs directly; no move into a generated folder is needed. Existing jobs
-can be resumed unchanged. The checked deliverables are additional copies.
-
-UPDATE 0.1.4: The output tab shows the exact expected PDF and TPC filenames.
-A mismatch error lists the helper job name and both selected filenames. If
-the helper name is wrong, use Change helper job name to correct it without
-moving files or repeating CAD programming. Review the PDF and run checks
-again afterward. Select the final job PDF, not the Assembly Beam2 part PDF.
+If Windows blocks execution after unblocking this exact ZIP, share the message.
+Do not disable system policy. Launch uses RemoteSigned for its own process.
+See README.md and VALIDATION.md for full behavior and validation limits.

@@ -1,7 +1,9 @@
 param(
     [Parameter(Mandatory)][string]$ReferenceTpc,
     [Parameter(Mandatory)][string]$ReferencePdf,
-    [Parameter(Mandatory)][string]$ReferenceCad
+    [Parameter(Mandatory)][string]$ReferenceCad,
+    [Parameter(Mandatory)][string]$ReferenceTubx,
+    [Parameter(Mandatory)][string]$ReferenceTeox
 )
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2.0
@@ -111,6 +113,73 @@ try {
     $noHeader=[regex]::Replace($program,'(?ms)^BEGIN_FERTIGUNG_AUFTRAG_TMP.*?^ENDE_FERTIGUNG_AUFTRAG_TMP\r?\n','')
     $individual=Make-Tpc 'individual.tpc' $noHeader
     Reject { Get-TpcSummary $individual } 'Individual part TPC cannot substitute for a nested job' 'nested-job header'
+    Test-AutoRunContext $true @('TruLaser Tube 7000 (T12)') 1 0
+    Check $true 'Auto Run handoff accepts a selected Auto Run tab, verified T12, and one import dialog'
+    Reject { Test-AutoRunContext $false @('TruLaser Tube 7000 (T12)') 1 0 } 'Auto Run handoff rejects nesting tabs' 'Auto Run tab'
+    Reject { Test-AutoRunContext $true @('Other machine') 1 0 } 'Auto Run handoff rejects an unverified machine' 'machine'
+    Reject { Test-AutoRunContext $true @('TruLaser Tube 7000 (T12)') 0 0 } 'Auto Run handoff requires its specific import dialog' 'dialog'
+    Reject { Test-AutoRunContext $true @('TruLaser Tube 7000 (T12)') 1 1 } 'Auto Run handoff refuses an existing visible queue part' 'duplicate'
+    $properties=Read-TubxProperties $ReferenceTubx
+    Check (-not $properties.HasErrors -and $properties.Machine -ceq 'TruLaser Tube 7000 (T12)') 'Real uploaded TUBX properties are readable without processing errors'
+    $calcFolder=Join-Path $temp 'calculation';$null=New-Item -ItemType Directory -Path $calcFolder
+    $inputTeox=Join-Path $calcFolder 'Assembly Beam2.teox'
+    Copy-Item -LiteralPath $ReferenceTeox -Destination $inputTeox
+    $request=[pscustomobject]@{InputPath=$inputTeox;InputSHA256=(Get-FileHash -LiteralPath $inputTeox).Hash;
+        PartName='Assembly Beam2';RequestedUtc=[DateTime]::UtcNow.AddSeconds(-10).ToString('o');
+        PriorOutputs=@(foreach ($ext in @('.tpc','.tubx','.pdf')) { [pscustomobject]@{Path=[IO.Path]::ChangeExtension($inputTeox,$ext);Exists=$false} })}
+    $calcTpc=[IO.Path]::ChangeExtension($inputTeox,'.tpc');$calcTubx=[IO.Path]::ChangeExtension($inputTeox,'.tubx');$calcPdf=[IO.Path]::ChangeExtension($inputTeox,'.pdf')
+    function Reset-CalculationFiles {
+        Copy-Item -LiteralPath $individual -Destination $calcTpc -Force
+        Copy-Item -LiteralPath $ReferenceTubx -Destination $calcTubx -Force
+        Copy-Item -LiteralPath $ReferencePdf -Destination $calcPdf -Force
+        foreach ($path in @($calcTpc,$calcTubx,$calcPdf)) { [IO.File]::SetLastWriteTimeUtc($path,[DateTime]::UtcNow.AddSeconds(-3)) }
+    }
+    Reset-CalculationFiles
+    Check ((Test-AutoRunCalculation $request).Status -eq 'OutputsVerified') 'Fresh consistent part outputs verify independently of final job collection'
+    $edgeRequest=$request | Select-Object *
+    $edgeRequest.RequestedUtc=[DateTime]::UtcNow.AddSeconds(-2).ToString('o')
+    $edgeRequest.PriorOutputs=@(foreach ($path in @($calcTpc,$calcTubx,$calcPdf)) {
+        $item=Get-Item -LiteralPath $path
+        [pscustomobject]@{Path=$path;Exists=$true;Length=$item.Length;WriteTicks=$item.LastWriteTimeUtc.Ticks;SHA256=(Get-FileHash -LiteralPath $path).Hash}
+    })
+    Check ((Test-AutoRunCalculation $edgeRequest).Status -eq 'Pending') 'An unchanged cached output is rejected even within timestamp tolerance'
+    [IO.File]::SetLastWriteTimeUtc($calcTpc,[DateTime]::UtcNow.AddHours(-1))
+    Check ((Test-AutoRunCalculation $request).Status -eq 'Pending') 'Stale cached part output cannot count as a fresh calculation'
+    Reset-CalculationFiles;Remove-Item -LiteralPath $calcPdf
+    Check ((Test-AutoRunCalculation $request).Status -eq 'Pending') 'Missing part PDF keeps calculation pending'
+    Reset-CalculationFiles;Add-Content -LiteralPath $inputTeox -Value 'changed'
+    Check ((Test-AutoRunCalculation $request).Status -eq 'Failed') 'Changed TEOX invalidates its import receipt'
+    Copy-Item -LiteralPath $ReferenceTeox -Destination $inputTeox -Force
+    $wrongMachine=Make-Tpc 'calc-wrong-machine.tpc' ($noHeader.Replace("DA,'T12',1", "DA,'OTHER',1"))
+    Reset-CalculationFiles;Copy-Item -LiteralPath $wrongMachine -Destination $calcTpc -Force
+    [IO.File]::SetLastWriteTimeUtc($calcTpc,[DateTime]::UtcNow.AddSeconds(-3))
+    Check ((Test-AutoRunCalculation $request).Status -eq 'Failed') 'Wrong calculated machine is rejected'
+    $wrongPart=Make-Tpc 'calc-wrong-part.tpc' ($noHeader.Replace("'Assembly_Beam2','HP'", "'DifferentPart','HP'"))
+    Reset-CalculationFiles;Copy-Item -LiteralPath $wrongPart -Destination $calcTpc -Force
+    [IO.File]::SetLastWriteTimeUtc($calcTpc,[DateTime]::UtcNow.AddSeconds(-3))
+    Check ((Test-AutoRunCalculation $request).Status -eq 'Failed') 'Wrong calculated part program is rejected'
+    Reset-CalculationFiles;Copy-Item -LiteralPath $ReferenceTpc -Destination $calcTpc -Force
+    [IO.File]::SetLastWriteTimeUtc($calcTpc,[DateTime]::UtcNow.AddSeconds(-3))
+    Check ((Test-AutoRunCalculation $request).Status -eq 'Failed') 'Nested package cannot substitute for fresh individual-part output'
+    function Write-TestTubx([string]$xml) {
+        Remove-Item -LiteralPath $calcTubx
+        $archive=[IO.Compression.ZipFile]::Open($calcTubx,[IO.Compression.ZipArchiveMode]::Create)
+        try {
+            $entry=$archive.CreateEntry('tubeProps/app.xml');$writer=New-Object IO.StreamWriter($entry.Open())
+            try { $writer.Write($xml) } finally { $writer.Dispose() }
+        } finally { $archive.Dispose() }
+        [IO.File]::SetLastWriteTimeUtc($calcTubx,[DateTime]::UtcNow.AddSeconds(-3))
+    }
+    $xml='<appProperties><machineId>TruLaser Tube 7000 (T12)</machineId><profileId>1_600X600X50_1_25</profileId><errors /></appProperties>'
+    Reset-CalculationFiles;Write-TestTubx ($xml.Replace('<errors />','<errors><error>Processing failed</error></errors>'))
+    Check ((Test-AutoRunCalculation $request).Status -eq 'Failed') 'Reported TUBX processing errors are rejected'
+    Reset-CalculationFiles;Write-TestTubx ($xml.Replace('1_600X600X50_1_25','wrong-profile'))
+    Check ((Test-AutoRunCalculation $request).Status -eq 'Failed') 'TPC and TUBX profile disagreement is rejected'
+    Write-TestTubx ('<!DOCTYPE appProperties [<!ENTITY sample "text">]>'+ $xml)
+    Reject { Read-TubxProperties $calcTubx } 'TUBX XML document type declarations are prohibited'
+    Reset-CalculationFiles;[IO.File]::WriteAllText($calcTpc,'incomplete')
+    [IO.File]::SetLastWriteTimeUtc($calcTpc,[DateTime]::UtcNow.AddSeconds(-3))
+    Check ((Test-AutoRunCalculation $request).Status -eq 'Pending') 'Incomplete or unreadable calculation output is not marked verified'
     $duplicate=Make-Tpc 'duplicate.tpc' $program -DuplicateEntry
     Reject { Get-TpcSummary $duplicate } 'Duplicate ZIP entries are rejected' 'Duplicate'
     $zeroQty=Make-Tpc 'zero.tpc' ($program.Replace("'Assembly_Beam2',10","'Assembly_Beam2',0"))

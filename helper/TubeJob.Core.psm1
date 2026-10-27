@@ -74,7 +74,7 @@ function Read-TrumpfTable {
 }
 
 function Get-TpcSummary {
-    param([Parameter(Mandatory)][string]$Path)
+    param([Parameter(Mandatory)][string]$Path,[switch]$AllowPartOnly)
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $file = Get-Item -LiteralPath $Path
     if ($file.Length -gt 134217728 -or $file.Length -eq 0) { throw 'TPC must be nonempty and at most 128 MiB.' }
@@ -87,6 +87,7 @@ function Get-TpcSummary {
         $machines = New-Object 'System.Collections.Generic.List[string]'
         $profiles = New-Object 'System.Collections.Generic.List[string]'
         $programCount = 0
+        $programNames = New-Object 'System.Collections.Generic.List[string]'
         foreach ($entry in $archive.Entries) {
             $name = $entry.FullName.Replace('\', '/')
             if ($seen.ContainsKey($name) -or $name -match '(^/|(^|/)\.\.(/|$)|:)') { throw 'Duplicate or unsafe TPC entry name.' }
@@ -133,9 +134,12 @@ function Get-TpcSummary {
                 foreach ($table in @(Read-TrumpfTable $text 'TUBE_TECH')) {
                     foreach ($row in $table.Records) { if ($row.ContainsKey('10')) { $profiles.Add($row['10']) } }
                 }
+                foreach ($table in @(Read-TrumpfTable $text 'PROGRAMM')) {
+                    foreach ($row in $table.Records) { if ($row.ContainsKey('10')) { $programNames.Add($row['10']) } }
+                }
             } finally { $stream.Dispose(); $memory.Dispose() }
         }
-        if ($programCount -eq 0 -or $parts.Count -eq 0 -or $machines.Count -eq 0) {
+        if ($programCount -eq 0 -or ($parts.Count -eq 0 -and -not $AllowPartOnly) -or $machines.Count -eq 0) {
             throw 'No supported nested-job header and machine identity found. An individual part TPC is insufficient.'
         }
         $keys = @{}
@@ -147,9 +151,94 @@ function Get-TpcSummary {
         [pscustomobject]@{
             Parts=$parts.ToArray(); Machines=@($machines | Select-Object -Unique)
             Profiles=@($profiles | Select-Object -Unique); ProgramCount=$programCount
+            ProgramNames=$programNames.ToArray()
             ArchiveReadability='Passed (not an independent ZIP CRC or toolpath check)'
         }
     } finally { $archive.Dispose() }
+}
+
+function Test-AutoRunContext {
+    param([bool]$AutoRunTabSelected,[string[]]$MachineNames,[int]$DialogCount,[int]$ExistingPartCount)
+    if (-not $AutoRunTabSelected) { throw 'Select the Auto Run tab, not a nesting tab, before opening its + import dialog.' }
+    $machine=@($MachineNames | Where-Object { ($_ -replace '\s','') -ieq 'TruLaserTube7000(T12)' })
+    if ($machine.Count -ne 1) { throw 'The selected TruLaser Tube 7000 (T12) machine could not be verified. Select it in Auto Run and save a control report if this persists.' }
+    if ($DialogCount -ne 1) { throw 'In Auto Run, click + once to open the Select TEOX files for import dialog. Then use Import TEOX in the helper.' }
+    if ($ExistingPartCount -gt 0) { throw 'This part is already visible in the Auto Run queue. Inspect it manually; the helper will not add a duplicate automatically.' }
+}
+
+function Read-TubxProperties {
+    param([string]$Path)
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive=[IO.Compression.ZipFile]::OpenRead($Path)
+    try {
+        $entries=@($archive.Entries | Where-Object { $_.FullName -ceq 'tubeProps/app.xml' })
+        if ($entries.Count -ne 1 -or $entries[0].Length -gt 1048576) { throw 'TUBX application metadata is missing, duplicated, or too large.' }
+        $stream=$entries[0].Open()
+        $settings=New-Object Xml.XmlReaderSettings
+        $settings.DtdProcessing=[Xml.DtdProcessing]::Prohibit; $settings.XmlResolver=$null
+        $settings.MaxCharactersInDocument=1048576
+        $reader=[Xml.XmlReader]::Create($stream,$settings)
+        try {
+            $xml=New-Object Xml.XmlDocument; $xml.XmlResolver=$null; $xml.Load($reader)
+            $machine=$xml.SelectSingleNode('/*[local-name()="appProperties"]/*[local-name()="machineId"]')
+            $profile=$xml.SelectSingleNode('/*[local-name()="appProperties"]/*[local-name()="profileId"]')
+            $errors=$xml.SelectSingleNode('/*[local-name()="appProperties"]/*[local-name()="errors"]')
+            if ($null -eq $machine -or $null -eq $profile -or $null -eq $errors) { throw 'TUBX metadata format is unsupported.' }
+            [pscustomobject]@{Machine=$machine.InnerText;Profile=$profile.InnerText;
+                HasErrors=($errors.SelectNodes('./*').Count -gt 0 -or -not [string]::IsNullOrWhiteSpace($errors.InnerText))}
+        } finally { $reader.Dispose(); $stream.Dispose() }
+    } finally { $archive.Dispose() }
+}
+
+function Test-AutoRunCalculation {
+    param($Request,[DateTime]$Now=[DateTime]::UtcNow)
+    # A fresh part calculation is separate from the final nested-job check.
+    $started=[DateTime]::Parse($Request.RequestedUtc).ToUniversalTime()
+    if (-not (Test-Path -LiteralPath $Request.InputPath -PathType Leaf) -or
+        (Get-FileHash -LiteralPath $Request.InputPath -Algorithm SHA256).Hash -cne $Request.InputSHA256) {
+        return [pscustomobject]@{Status='Failed';Message='The requested TEOX is missing or changed after import was requested.'}
+    }
+    $files=@(foreach ($extension in @('.tpc','.tubx','.pdf')) { [IO.Path]::ChangeExtension($Request.InputPath,$extension) })
+    foreach ($path in $files) {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return [pscustomobject]@{Status='Pending';Message='Waiting for '+[IO.Path]::GetFileName($path)} }
+        $item=Get-Item -LiteralPath $path
+        if ($item.LastWriteTimeUtc -lt $started.AddSeconds(-2) -or $item.Length -eq 0 -or $item.LastWriteTimeUtc -gt $Now.AddSeconds(-1)) {
+            return [pscustomobject]@{Status='Pending';Message='Waiting for fresh, settled calculation outputs; older files do not count.'}
+        }
+        if (-not $Request.PSObject.Properties['PriorOutputs']) { return [pscustomobject]@{Status='Failed';Message='Import receipt has no prior-output snapshot. Request a new helper import.'} }
+        $before=@($Request.PriorOutputs | Where-Object { $_.Path -ieq $path })
+        if ($before.Count -ne 1) { return [pscustomobject]@{Status='Failed';Message='Import receipt output snapshot is incomplete or ambiguous.'} }
+        if ($before[0].Exists -and $item.LastWriteTimeUtc.Ticks -le $before[0].WriteTicks -and
+            $item.Length -eq $before[0].Length -and (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ceq $before[0].SHA256) {
+            return [pscustomobject]@{Status='Pending';Message='An output is unchanged from before this import request; cached output does not count.'}
+        }
+    }
+    try {
+        $hashes=@($files | ForEach-Object { (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash })
+        $tpc=Get-TpcSummary $files[0] -AllowPartOnly
+        $tubx=Read-TubxProperties $files[1]
+        if ($tpc.Parts.Count -ne 0) { return [pscustomobject]@{Status='Failed';Message='Expected an individual part TPC from calculation, but found a nested-job TPC.'} }
+        $expectedProgram=$Request.PartName -replace '\s','_'
+        if ($tpc.Machines.Count -ne 1 -or $tpc.Machines[0] -cne 'T12' -or
+            $tpc.ProgramNames.Count -ne 1 -or $tpc.ProgramNames[0] -ine $expectedProgram -or
+            ($tubx.Machine -replace '\s','') -ine 'TruLaserTube7000(T12)' -or
+            [string]::IsNullOrWhiteSpace($tubx.Profile) -or $tpc.Profiles -notcontains $tubx.Profile) {
+            return [pscustomobject]@{Status='Failed';Message='Fresh calculation outputs do not agree on the expected part, T12 machine, and profile.'}
+        }
+        if ($tubx.HasErrors) { return [pscustomobject]@{Status='Failed';Message='TUBX metadata contains processing errors. Inspect the part in TRUMPF.'} }
+        $stream=[IO.File]::OpenRead($files[2])
+        try {
+            $header=New-Object byte[] 5; $null=$stream.Read($header,0,5)
+            if ([Text.Encoding]::ASCII.GetString($header) -ne '%PDF-') { throw 'Part report is not a PDF.' }
+        } finally { $stream.Dispose() }
+        for ($i=0;$i -lt $files.Count;$i++) {
+            if ((Get-FileHash -LiteralPath $files[$i] -Algorithm SHA256).Hash -cne $hashes[$i]) { throw 'Outputs changed during inspection.' }
+        }
+        [pscustomobject]@{Status='OutputsVerified';Message='Fresh part TPC, TUBX, and PDF verified. Inspect the Auto Run green check and warnings before nesting. No machine simulation was performed.';
+            CheckedUtc=$Now.ToUniversalTime().ToString('o');Files=$files;SHA256=$hashes;Machine='T12';Profile=$tubx.Profile}
+    } catch {
+        [pscustomobject]@{Status='Pending';Message='Outputs are not yet readable as a complete supported set: '+$_.Exception.Message}
+    }
 }
 
 function Test-JobName {
@@ -388,4 +477,4 @@ Complete your usual TRUMPF simulation and operator release before production.
     return $completed
 }
 
-Export-ModuleMember -Function ConvertFrom-TrumpfCsv,Read-TrumpfTable,Get-TpcSummary,Test-JobName,Get-TubeDesignShortcutCandidates,Assert-TubeToolbarState,Get-TubeOutputDirectory,New-TubeJob,Save-TubeJob,Set-TubeJobName,Open-TubeJob,Test-TubePackage,Copy-CheckedPackage
+Export-ModuleMember -Function ConvertFrom-TrumpfCsv,Read-TrumpfTable,Get-TpcSummary,Test-AutoRunContext,Test-AutoRunCalculation,Read-TubxProperties,Test-JobName,Get-TubeDesignShortcutCandidates,Assert-TubeToolbarState,Get-TubeOutputDirectory,New-TubeJob,Save-TubeJob,Set-TubeJobName,Open-TubeJob,Test-TubePackage,Copy-CheckedPackage

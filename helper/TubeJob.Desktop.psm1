@@ -98,7 +98,7 @@ function Assert-TubeAccess {
     $workerLevel=[TubeJobNative]::Elevation([Diagnostics.Process]::GetCurrentProcess().Id)
     $tubeLevel=[TubeJobNative]::Elevation($Process.Id)
     if ($workerLevel -eq 'Standard' -and $tubeLevel -eq 'Elevated') {
-        throw 'Tube Design is running as administrator but the helper is not. Windows can block desktop controls across those levels. Keep both at the same level; if your normal TRUMPF shortcut requires administrator access, close the helper and use Run as administrator on Start Helper.cmd. No privilege change was made automatically.'
+        throw 'The TRUMPF application is running as administrator but the helper is not. Windows can block desktop controls across those levels. Keep both at the same level; if your normal TRUMPF shortcut requires administrator access, close the helper and use Run as administrator on Start Helper.cmd. No privilege change was made automatically.'
     }
 }
 
@@ -232,6 +232,95 @@ function Invoke-TubeIdentify {
     return 'Identify profile requested. Select the body and review material, dimensions, profile, and direction; confirm in Tube Design.'
 }
 
+function Invoke-AutoRunImport {
+    param([string]$InputPath)
+    Initialize-TubeDesktop
+    $file=Get-Item -LiteralPath $InputPath
+    if ($file.Extension -ine '.teox') { throw 'Choose the registered TEOX input.' }
+    $processes=@(Get-Process -Name ProgrammingTubeAutoRun -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 })
+    if ($processes.Count -ne 1) { throw 'Open exactly one visible Programming Tube Auto Run window first.' }
+    $process=$processes[0]
+    Assert-TubeAccess $process
+    $root=[System.Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)
+    $all=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+    $tabSelected=$false
+    $machineNames=New-Object 'System.Collections.Generic.List[string]'
+    $dialogs=New-Object 'System.Collections.Generic.List[object]'
+    $existingPartCount=0
+    foreach ($element in $all) {
+        $info=$element.Current
+        if ($info.ControlType -eq [System.Windows.Automation.ControlType]::TabItem) {
+            $labelCondition=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty,'Auto Run')
+            if ($null -ne $element.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$labelCondition)) {
+                $selection=$null
+                if ($element.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern,[ref]$selection) -and $selection.Current.IsSelected) { $tabSelected=$true }
+            }
+        }
+        if ($info.ControlType -eq [System.Windows.Automation.ControlType]::ComboBox -and -not $info.IsOffscreen) {
+            $values=New-Object 'System.Collections.Generic.List[string]'
+            $values.Add($info.Name)
+            $selection=$null
+            if ($element.TryGetCurrentPattern([System.Windows.Automation.SelectionPattern]::Pattern,[ref]$selection)) {
+                foreach ($selected in $selection.Current.GetSelection()) {
+                    $values.Add($selected.Current.Name)
+                    foreach ($child in $selected.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)) {
+                        if ($child.Current.ControlType -eq [System.Windows.Automation.ControlType]::Text) { $values.Add($child.Current.Name) }
+                    }
+                }
+            }
+            $valuePattern=$null
+            if ($element.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern,[ref]$valuePattern)) { $values.Add($valuePattern.Current.Value) }
+            if (@($values | Where-Object { ($_ -replace '\s','') -ieq 'TruLaserTube7000(T12)' }).Count -gt 0) { $machineNames.Add('TruLaser Tube 7000 (T12)') }
+        }
+        if ($info.Name -ceq 'Select TEOX files for import.' -and $info.ClassName -eq '#32770' -and $info.ProcessId -eq $process.Id) { $dialogs.Add($element) }
+        if (-not $info.IsOffscreen -and $info.Name -ieq $file.BaseName) {
+            $inChooser=$false; $ancestor=$element
+            for ($level=0;$level -lt 24 -and $null -ne $ancestor;$level++) {
+                if ($ancestor.Current.Name -ceq 'Select TEOX files for import.') { $inChooser=$true; break }
+                $ancestor=[System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($ancestor)
+            }
+            if (-not $inChooser) { $existingPartCount++ }
+        }
+    }
+    Test-AutoRunContext $tabSelected $machineNames.ToArray() $dialogs.Count $existingPartCount
+    $dialog=$dialogs[0]
+    $controls=$dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+    $edits=@($controls | Where-Object {
+        $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Edit -and
+        ($_.Current.AutomationId -eq '1148' -or $_.Current.Name -eq 'File name:') -and
+        $_.Current.IsEnabled -and -not $_.Current.IsOffscreen
+    })
+    if ($edits.Count -ne 1) { throw 'Auto Run filename field is missing or ambiguous. Save a control report with the import dialog still open.' }
+    $value=$null
+    if (-not $edits[0].TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern,[ref]$value)) { throw 'Auto Run filename field does not expose a writable value. Save a control report.' }
+    $openButtons=@($controls | Where-Object {
+        $_.Current.Name -eq 'Open' -and $_.Current.AutomationId -eq '1' -and $_.Current.ClassName -eq 'Button' -and
+        $_.Current.IsEnabled -and -not $_.Current.IsOffscreen
+    })
+    if ($openButtons.Count -ne 1) { throw 'The Auto Run Open button is unavailable or ambiguous. No import was requested.' }
+    $button=[IntPtr]$openButtons[0].Current.NativeWindowHandle
+    $dialogHandle=[IntPtr]$dialog.Current.NativeWindowHandle
+    $nativeProcess=[uint32]0
+    [void][TubeJobNative]::GetWindowThreadProcessId($button,[ref]$nativeProcess)
+    if ($button -eq [IntPtr]::Zero -or $dialogHandle -eq [IntPtr]::Zero -or
+        $nativeProcess -ne $process.Id -or [TubeJobNative]::GetDlgCtrlID($button) -ne 1) { throw 'Auto Run Open button identity could not be verified.' }
+    $value.SetValue($file.FullName)
+    if ($value.Current.Value -cne $file.FullName) { throw 'The TEOX filename did not remain in the file chooser.' }
+    Set-VerifiedTubeForeground $dialogHandle $process.Id
+    $prior=@(foreach ($extension in @('.tpc','.tubx','.pdf')) {
+        $output=[IO.Path]::ChangeExtension($file.FullName,$extension)
+        if (Test-Path -LiteralPath $output -PathType Leaf) {
+            $item=Get-Item -LiteralPath $output
+            [pscustomobject]@{Path=$output;Exists=$true;Length=$item.Length;WriteTicks=$item.LastWriteTimeUtc.Ticks;
+                SHA256=(Get-FileHash -LiteralPath $output -Algorithm SHA256).Hash}
+        } else { [pscustomobject]@{Path=$output;Exists=$false} }
+    })
+    $request=[pscustomobject]@{RequestedUtc=[DateTime]::UtcNow.ToString('o');InputPath=$file.FullName;
+        InputSHA256=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash;PartName=$file.BaseName;PriorOutputs=$prior}
+    if (-not [TubeJobNative]::PostMessage($button,0xF5,[IntPtr]::Zero,[IntPtr]::Zero)) { throw 'Windows rejected the Auto Run Open request.' }
+    return [pscustomobject]@{Message='Auto Run import requested. Watching for fresh part outputs beside the TEOX; inspect any TRUMPF prompts.';Request=$request}
+}
+
 function Save-TubeControls {
     param([string]$OutputPath)
     Initialize-TubeDesktop
@@ -239,14 +328,27 @@ function Save-TubeControls {
     $lines.Add('Helper privilege: '+[TubeJobNative]::Elevation([Diagnostics.Process]::GetCurrentProcess().Id))
     $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
     function Read-Controls($element, [int]$depth) {
-        if ($depth -gt 6 -or $lines.Count -ge 1000) { return }
+        if ($depth -gt 14 -or $lines.Count -ge 5000) { return }
         try {
             $item = $element.Current
-            $lines.Add(('{0}{1} | Name={2} | Id={3} | Class={4} | Enabled={5}' -f
-                ('  '*$depth),$item.ControlType.ProgrammaticName,$item.Name,$item.AutomationId,$item.ClassName,$item.IsEnabled))
-            if ($depth -ge 6) { return }
+            $patterns='unavailable'
+            try { $patterns=@($element.GetSupportedPatterns() | ForEach-Object { $_.ProgrammaticName }) -join ',' } catch { }
+            $selectionState=''
+            try {
+                $selection=$null
+                if ($item.ControlType -eq [System.Windows.Automation.ControlType]::TabItem -and
+                    $element.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern,[ref]$selection)) {
+                    $selectionState='Selected='+$selection.Current.IsSelected
+                } elseif ($item.ControlType -eq [System.Windows.Automation.ControlType]::ComboBox -and
+                    $element.TryGetCurrentPattern([System.Windows.Automation.SelectionPattern]::Pattern,[ref]$selection)) {
+                    $selectionState='Selected='+(@($selection.Current.GetSelection() | ForEach-Object { $_.Current.Name }) -join ',')
+                }
+            } catch { $selectionState='Selection unavailable' }
+            $lines.Add(('{0}{1} | Name={2} | Id={3} | Class={4} | Enabled={5} | Offscreen={6} | Help={7} | Patterns={8} | {9}' -f
+                ('  '*$depth),$item.ControlType.ProgrammaticName,$item.Name,$item.AutomationId,$item.ClassName,$item.IsEnabled,$item.IsOffscreen,$item.HelpText,$patterns,$selectionState))
+            if ($depth -ge 14) { $lines.Add('Depth limit reached.'); return }
             $child = $walker.GetFirstChild($element)
-            while ($null -ne $child -and $lines.Count -lt 1000) {
+            while ($null -ne $child -and $lines.Count -lt 5000) {
                 Read-Controls $child ($depth+1)
                 $child = $walker.GetNextSibling($child)
             }
@@ -277,4 +379,4 @@ function Save-TubeControls {
     return 'Saved application control names only. No desktop screenshots or unrelated windows were captured.'
 }
 
-Export-ModuleMember -Function Invoke-TubeImport,Invoke-TubeIdentify,Save-TubeControls
+Export-ModuleMember -Function Invoke-TubeImport,Invoke-TubeIdentify,Invoke-AutoRunImport,Save-TubeControls
