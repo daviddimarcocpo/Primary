@@ -302,6 +302,9 @@ function Invoke-TubeModelSave {
     param([string]$InputPath)
     Initialize-TubeDesktop
     $process=Get-TubeDesignWindow; Assert-TubeAccess $process
+    if (-not (Test-TubeDocumentTitle $process.MainWindowTitle ([IO.Path]::GetFileNameWithoutExtension($InputPath)))) {
+        throw 'The document behind the model-save dialog does not match the selected part. No filename was entered.'
+    }
     $title='Name of the tube design model to be stored'
     $dialogs=@([TubeJobNative]::FindDialogs($process.MainWindowHandle,$process.Id,$title))
     if ($dialogs.Count -ne 1) { throw 'Open the recorded model-save dialog first by accepting the save prerequisite in Tube Design. No generic dialog was accepted.' }
