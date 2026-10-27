@@ -1,12 +1,16 @@
-TUBE JOB HELPER 0.1
+TUBE JOB HELPER 0.1.1
 
-1. Extract the entire ZIP to a folder on your Windows programming computer.
+1. On the downloaded ZIP, use Properties > Unblock if shown. Extract the entire
+   ZIP into a new folder. This unblocks only this package, not system policy.
 2. Double-click Start Helper.cmd.
 3. Start with Assembly Beam2.stp, quantity 10, stock 240 inches, and job name:
    CODEX TEST 10262026 SQ6X25
 4. Click Create job. This makes new folders and copies the CAD; it does not
    change your original file or reuse your previous output folder.
-5. Open Tube Design. Click Import working copy in the helper. Check whether
+5. Save work and close any previously started Tube Design instance normally.
+   Open Tube Design using its usual TRUMPF shortcut, or the updated helper
+   button. The helper now uses the installed shortcut, never sldworks directly.
+   Click Import working copy in the helper. Check whether
    the correct part loads. If it stops or Windows blocks it, share the error.
    Do not disable security settings or run the old probe scripts.
 

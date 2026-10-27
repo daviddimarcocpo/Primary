@@ -14,8 +14,9 @@ $script:job = $null
 $script:report = $null
 $script:busy = $false
 $script:reviewedPdfHash = $null
+$script:tubeDesignShortcut = $null
 $form = New-Object Windows.Forms.Form
-$form.Text = 'Tube Job Helper 0.1 - assisted workflow'
+$form.Text = 'Tube Job Helper 0.1.1 - assisted workflow'
 $form.ClientSize = New-Object Drawing.Size(1000,760)
 $form.StartPosition = 'CenterScreen'
 $form.MinimumSize = New-Object Drawing.Size(1016,799)
@@ -105,17 +106,61 @@ function Invoke-DesktopAction($action) {
     }
 }
 function Launch-Application($kind) {
-    $paths = if ($kind -eq 'Tube Design') {
-        @('C:\Program Files\TRUMPF\TruTops\TubeDesign\bin\sldworks.exe','C:\Program Files\TRUMPF\TruTops\TubeDesign\binTD\TubeDesign.exe')
-    } else { @('C:\Program Files\TRUMPF\TruTops\ProgrammingTubeAutoRun\ProgrammingTubeAutoRun.exe') }
     $processName=if ($kind -eq 'Tube Design') { 'sldworks' } else { 'ProgrammingTubeAutoRun' }
     if (@(Get-Process -Name $processName -ErrorAction SilentlyContinue).Count -gt 0) {
         [void][Windows.Forms.MessageBox]::Show($form,"$kind is already running. Switch to its window.",'Application running')
         return
     }
-    $exe=@($paths | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }) | Select-Object -First 1
-    if (-not $exe) { throw "Installed $kind executable was not found at the recorded paths. Open it normally from your Start menu." }
-    Start-Process -FilePath $exe -WorkingDirectory (Split-Path -Parent $exe)
+    if ($kind -eq 'Tube Design') {
+        if (-not $script:tubeDesignShortcut -or -not (Test-Path -LiteralPath $script:tubeDesignShortcut -PathType Leaf)) {
+            $shell=New-Object -ComObject WScript.Shell
+            try {
+                $shortcuts=New-Object 'System.Collections.Generic.List[object]'
+                $roots=@([Environment]::GetFolderPath('StartMenu'),[Environment]::GetFolderPath('CommonStartMenu'),
+                    [Environment]::GetFolderPath('DesktopDirectory'),[Environment]::GetFolderPath('CommonDesktopDirectory')) |
+                    Where-Object { $_ } | Select-Object -Unique
+                foreach ($root in $roots) {
+                    foreach ($link in @(Get-ChildItem -LiteralPath $root -Filter '*.lnk' -Recurse -ErrorAction SilentlyContinue)) {
+                        if ($link.BaseName -notmatch '(?i)Tube[\s_-]*Design') { continue }
+                        try {
+                            $details=$shell.CreateShortcut($link.FullName)
+                            $shortcuts.Add([pscustomobject]@{Name=$link.BaseName;Path=$link.FullName;
+                                TargetPath=$details.TargetPath;Arguments=$details.Arguments;WorkingDirectory=$details.WorkingDirectory})
+                        } catch { }
+                    }
+                }
+                $candidates=@(Get-TubeDesignShortcutCandidates $shortcuts.ToArray() | Where-Object { Test-Path -LiteralPath $_.TargetPath -PathType Leaf })
+                if ($candidates.Count -eq 1) {
+                    $script:tubeDesignShortcut=$candidates[0].Path
+                } else {
+                    $dialog=New-Object Windows.Forms.OpenFileDialog
+                    try {
+                        $dialog.Title='Select the normal TRUMPF Tube Design shortcut you use to start the software'
+                        $dialog.Filter='Tube Design Windows shortcut|*.lnk'; $dialog.DereferenceLinks=$false
+                        $dialog.InitialDirectory=[Environment]::GetFolderPath('DesktopDirectory')
+                        if ($dialog.ShowDialog($form) -ne 'OK') { return }
+                        $details=$shell.CreateShortcut($dialog.FileName)
+                        $selected=[pscustomobject]@{Name=[IO.Path]::GetFileNameWithoutExtension($dialog.FileName);Path=$dialog.FileName;
+                            TargetPath=$details.TargetPath;Arguments=$details.Arguments;WorkingDirectory=$details.WorkingDirectory}
+                        if (@(Get-TubeDesignShortcutCandidates @($selected)).Count -ne 1 -or -not (Test-Path -LiteralPath $selected.TargetPath -PathType Leaf)) {
+                            throw 'That is not a supported TRUMPF Tube Design starter shortcut. Open Tube Design from your normal Start menu shortcut instead. The helper will not launch sldworks.exe directly.'
+                        }
+                        $script:tubeDesignShortcut=$selected.Path
+                    } finally { $dialog.Dispose() }
+                }
+            } finally { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($shell) }
+        }
+        $start=New-Object Diagnostics.ProcessStartInfo
+        $start.FileName=$script:tubeDesignShortcut; $start.UseShellExecute=$true
+        # Shell-launch the .lnk itself; don't reconstruct or drop its arguments.
+        $launched=[Diagnostics.Process]::Start($start)
+        if ($null -ne $launched) { $launched.Dispose() }
+        Write-SessionLog 'Requested Tube Design startup through its installed Windows shortcut.'
+    } else {
+        $exe='C:\Program Files\TRUMPF\TruTops\ProgrammingTubeAutoRun\ProgrammingTubeAutoRun.exe'
+        if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'Open Auto Run normally from your Start menu; the recorded executable path was not found.' }
+        Start-Process -FilePath $exe -WorkingDirectory (Split-Path -Parent $exe)
+    }
 }
 
 function Show-PreparedJob {

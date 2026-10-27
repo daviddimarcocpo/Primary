@@ -2,15 +2,17 @@
 
 A local Windows assistant for preparing TRUMPF tube-laser jobs and collecting the **Production Package PDF and nested TPC**. Built around the supplied Tube Design 17 / Programming Tube Auto Run 7.0.1 demonstration for TruLaser Tube 7000 (T12).
 
-**Version 0.1 is an assisted workflow, not unattended CAD-to-machine programming.** It does not require a TRUMPF API license. Its Import and Identify commands use ordinary visible Tube Design controls and still require a first test on the programming workstation. Auto Run, nesting, contour selection, and export remain guided operator actions in this release. No simulation, machine operation, network transfer, or USB copy is performed.
+**Version 0.1.1 is an assisted workflow, not unattended CAD-to-machine programming.** It does not require a TRUMPF API license. Its Import and Identify commands use ordinary visible Tube Design controls and still require a first test on the programming workstation. Auto Run, nesting, contour selection, and export remain guided operator actions in this release. No simulation, machine operation, network transfer, or USB copy is performed.
 
 ## First run
 
 1. Extract the complete helper ZIP into a normal folder on your Windows computer. Keep the `helper` subfolder beside `Start Helper.cmd`.
 2. Double-click **Start Helper.cmd**. It uses built-in Windows PowerShell 5.1 and .NET; there is no Python or additional package installation.
-3. If Windows blocks execution, stop and share the actual message. The launcher requests `RemoteSigned` for its PowerShell process only; it does not permanently change execution policy, elevate privileges, or disable Windows controls. This prototype is not code-signed, so managed policy or downloaded-file restrictions may prevent it from launching.
+3. Download only from your own repository. If Windows marks that ZIP as downloaded, right-click the ZIP, choose Properties, select Unblock if shown, then extract into a new folder. This unblocks only that downloaded package. If it remains blocked, stop and share the actual message. The launcher requests `RemoteSigned` for its PowerShell process only; it does not permanently change execution policy, elevate privileges, or disable Windows controls. This prototype is not code-signed, so managed policy or downloaded-file restrictions may prevent it from launching.
 4. Start with the known **Assembly Beam2** example rather than a new production job. Choose its STEP file, set quantity **10**, stock **240 inches**, and job name **CODEX TEST 10262026 SQ6X25**. The helper creates a new unique folder, so the previous job is retained.
 5. Follow the three tabs. Original CAD files are retained unchanged in `originals`. Import and save only from the new `work` folders. Expected output names follow the original CAD base name.
+
+**Startup correction in 0.1.1:** Open Tube Design now launches its installed TRUMPF Windows shortcut, retaining its arguments and working directory. It does not launch `sldworks.exe` directly. If more than one shortcut exists or none can be selected automatically, choose the normal Tube Design `.lnk` shortcut. If none is available, open Tube Design normally from the Start menu. Close the incorrectly started instance normally, saving any work, before retrying. This addresses a likely cause of the reported "Starter application not run correctly" error; a local retry is still required.
 
 The first desktop test is **Import working copy** with Tube Design open at its normal screen. It should open the recorded Import dialog, enter the staged path, and request import. Inspect the displayed part before continuing. If the control is unavailable, the helper stops with an explanation; use the import command manually. It never tries substitute toolbar IDs, coordinates, or global keystrokes.
 

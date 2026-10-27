@@ -33,6 +33,14 @@ try {
     Reject { ConvertFrom-TrumpfCsv "'unterminated,10" } 'Malformed quoted record' 'Unterminated'
     Reject { Test-JobName '../other' } 'Path traversal in job name'
     Reject { Test-JobName 'CON.txt' } 'Reserved Windows filename'
+    $normal=[pscustomobject]@{Name='Tube Design 17';Path='C:\Start Menu\Tube Design 17.lnk';TargetPath='C:\Program Files\TRUMPF\TruTops\TubeDesign\binTD\TubeDesign.exe';Arguments='-installed-mode';WorkingDirectory='C:\Program Files\TRUMPF\TruTops\TubeDesign\binTD'}
+    $wrong=[pscustomobject]@{Name='Tube Design';Path='C:\Desktop\Tube Design.lnk';TargetPath='C:\Program Files\TRUMPF\TruTops\TubeDesign\bin\sldworks.exe';Arguments='';WorkingDirectory=''}
+    $routes=@(Get-TubeDesignShortcutCandidates @($wrong,$normal))
+    Check ($routes.Count -eq 1 -and $routes[0].Path -ceq $normal.Path) 'Tube Design startup excludes direct sldworks and selects the TRUMPF starter shortcut'
+    Check ($routes[0].Arguments -ceq '-installed-mode' -and $routes[0].WorkingDirectory -ceq $normal.WorkingDirectory) 'Starter shortcut arguments and working directory are retained'
+    Check (@(Get-TubeDesignShortcutCandidates @($wrong)).Count -eq 0) 'No direct sldworks fallback when a starter shortcut is missing'
+    $duplicateRoute=[pscustomobject]@{Name=$normal.Name;Path='C:\Desktop\Tube Design 17.lnk';TargetPath=$normal.TargetPath;Arguments=$normal.Arguments;WorkingDirectory=$normal.WorkingDirectory}
+    Check (@(Get-TubeDesignShortcutCandidates @($normal,$duplicateRoute)).Count -eq 1) 'Equivalent installed starter shortcuts are deduplicated'
     $summary=Get-TpcSummary $ReferenceTpc
     Check ($summary.Parts.Count -eq 1 -and $summary.Parts[0].Quantity -eq 10) 'Actual uploaded TPC contains one part type and quantity 10'
     Check ($summary.Parts[0].JobName -ceq 'CODEX TEST 10262026 SQ6X25') 'Actual TPC job identity'

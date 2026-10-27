@@ -162,6 +162,24 @@ function Test-JobName {
     return $true
 }
 
+function Get-TubeDesignShortcutCandidates {
+    param([object[]]$Shortcuts)
+    # A running sldworks.exe is not the Tube Design starter. Preserve the normal
+    # TRUMPF shortcut, including arguments and working directory, as one route.
+    $seen = @{}
+    foreach ($shortcut in $Shortcuts) {
+        if ($shortcut.Name -notmatch '(?i)Tube[\s_-]*Design' -or
+            $shortcut.Path -notmatch '(?i)\.lnk$' -or
+            $shortcut.TargetPath -notmatch '(?i)[\\/]TRUMPF[\\/].*\.exe$' -or
+            $shortcut.TargetPath -match '(?i)(^|[\\/])sldworks\.exe$') { continue }
+        $route = $shortcut.TargetPath + [char]0 + $shortcut.Arguments + [char]0 + $shortcut.WorkingDirectory
+        if (-not $seen.ContainsKey($route)) {
+            $seen[$route] = $true
+            Write-Output $shortcut
+        }
+    }
+}
+
 function New-TubeJob {
     param([string]$Name, [string]$ParentDirectory, [object[]]$Parts, [decimal]$StockLengthInches)
     $null = Test-JobName $Name
@@ -317,4 +335,4 @@ Complete your usual TRUMPF simulation and operator release before production.
     return $completed
 }
 
-Export-ModuleMember -Function ConvertFrom-TrumpfCsv,Read-TrumpfTable,Get-TpcSummary,Test-JobName,New-TubeJob,Save-TubeJob,Open-TubeJob,Test-TubePackage,Copy-CheckedPackage
+Export-ModuleMember -Function ConvertFrom-TrumpfCsv,Read-TrumpfTable,Get-TpcSummary,Test-JobName,Get-TubeDesignShortcutCandidates,New-TubeJob,Save-TubeJob,Open-TubeJob,Test-TubePackage,Copy-CheckedPackage
