@@ -16,7 +16,7 @@ $script:busy = $false
 $script:reviewedPdfHash = $null
 $script:tubeDesignShortcut = $null
 $form = New-Object Windows.Forms.Form
-$form.Text = 'Tube Job Helper 0.1.3 - assisted workflow'
+$form.Text = 'Tube Job Helper 0.1.4 - assisted workflow'
 $form.ClientSize = New-Object Drawing.Size(1000,760)
 $form.StartPosition = 'CenterScreen'
 $form.MinimumSize = New-Object Drawing.Size(1016,799)
@@ -171,6 +171,14 @@ function Show-PreparedJob {
     foreach ($part in $script:job.Parts) { $null=$partList.Items.Add($part.PartName+' - quantity '+$part.Quantity) }
     $partList.SelectedIndex=0; $tabs.SelectedTab=$partsPage
     $packageInstructions.Text=Get-PackageInstructions
+    Update-ExpectedFileLabels
+}
+
+function Update-ExpectedFileLabels {
+    if ($null -ne $script:job) {
+        $expectedTpcLabel.Text='Expected TPC: '+$script:job.Name+'.tpc'
+        $expectedPdfLabel.Text='Expected PDF: '+$script:job.Name+'.pdf'
+    }
 }
 
 $null=Add-Label $setupPage 'Local assistant for TRUMPF. No API license required. This version guides the workflow; it is not unattended programming.' 18 18 940 38
@@ -343,6 +351,7 @@ $packageInstructions=New-Object Windows.Forms.TextBox
 $packageInstructions.Location=New-Object Drawing.Point(18,18); $packageInstructions.Size=New-Object Drawing.Size(925,295)
 $packageInstructions.Multiline=$true; $packageInstructions.ReadOnly=$true; $packageInstructions.ScrollBars='Vertical'
 $packageInstructions.Text='Create a job first.'; $packagePage.Controls.Add($packageInstructions)
+$expectedTpcLabel=Add-Label $packagePage 'Expected TPC: prepare a job first' 18 316 720 22
 $tpcPath=Add-Text $packagePage 18 340 720
 $null=Add-Button $packagePage 'Select final TPC...' 755 334 190 {
     try {
@@ -351,6 +360,7 @@ $null=Add-Button $packagePage 'Select final TPC...' 755 334 190 {
         if ($path) { $tpcPath.Text=$path; $script:report=$null }
     } catch { Show-Error $_.Exception.Message }
 }
+$expectedPdfLabel=Add-Label $packagePage 'Expected PDF: prepare a job first' 18 366 720 22
 $pdfPath=Add-Text $packagePage 18 390 720
 $null=Add-Button $packagePage 'Select job PDF...' 755 384 190 {
     try {
@@ -401,10 +411,32 @@ $null=Add-Button $packagePage 'Check and collect package' 18 625 260 {
         Write-SessionLog ('Metadata checked and package copied: '+$destination)
         $packageStatus.Text="Job/part quantities and machine metadata match. PDF filename/signature checked; PDF contents were acknowledged by you.`r`nCollected: $destination`r`nComplete your usual TRUMPF simulation and operator release. This is not a machine-readiness certification."
         Show-Folder $destination
-    } catch { $script:report=$null; $packageStatus.Text='Checks did not complete. '+$_.Exception.Message; Show-Error $_.Exception.Message }
+    } catch {
+        $script:report=$null
+        $failure=$_.Exception.Message
+        $packageStatus.Text='Checks did not complete. '+$failure
+        try { Write-SessionLog ('Package check failed: '+$failure) } catch { }
+        Show-Error $failure
+    }
 }
 $null=Add-Button $packagePage 'Open output folder' 295 625 230 {
     try { Show-Folder (Get-TubeOutputDirectory $script:job $partList.SelectedIndex $tpcPath.Text) } catch { Show-Error $_.Exception.Message }
+}
+$null=Add-Button $packagePage 'Change helper job name...' 540 625 260 {
+    try {
+        if ($null -eq $script:job) { throw 'Create or resume a job first.' }
+        Add-Type -AssemblyName Microsoft.VisualBasic
+        $name=[Microsoft.VisualBasic.Interaction]::InputBox('Enter the exact intended nested job name. This updates helper metadata only; files, folders, and TRUMPF programs are not renamed.','Helper job name',$script:job.Name)
+        if ([string]::IsNullOrWhiteSpace($name)) { return }
+        $oldName=$script:job.Name
+        Set-TubeJobName $script:job $name
+        $jobName.Text=$script:job.Name
+        $script:report=$null; $pdfReviewed.Checked=$false
+        $packageInstructions.Text=Get-PackageInstructions
+        Update-ExpectedFileLabels
+        Write-SessionLog ('Helper job name changed from ['+$oldName+'] to ['+$name+']. Output review reset.')
+        $packageStatus.Text='Helper name updated. Select the matching final nested job TPC/PDF, review the PDF again, and rerun the checks.'
+    } catch { Show-Error $_.Exception.Message }
 }
 $form.Add_FormClosing({ param($sender,$eventData) if ($script:busy) { $eventData.Cancel=$true } })
 try { [void]$form.ShowDialog() } finally { $form.Dispose() }

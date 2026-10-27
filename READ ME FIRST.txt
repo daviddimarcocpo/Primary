@@ -1,4 +1,4 @@
-TUBE JOB HELPER 0.1.3
+TUBE JOB HELPER 0.1.4
 
 1. On the downloaded ZIP, use Properties > Unblock if shown. Extract the entire
    ZIP into a new folder. This unblocks only this package, not system policy.
@@ -64,3 +64,9 @@ UPDATE 0.1.3: Keep all TRUMPF default output locations beside the input files.
 The helper's final TPC/PDF pickers start in the TEOX folder. Select those native
 outputs directly; no move into a generated folder is needed. Existing jobs
 can be resumed unchanged. The checked deliverables are additional copies.
+
+UPDATE 0.1.4: The output tab shows the exact expected PDF and TPC filenames.
+A mismatch error lists the helper job name and both selected filenames. If
+the helper name is wrong, use Change helper job name to correct it without
+moving files or repeating CAD programming. Review the PDF and run checks
+again afterward. Select the final job PDF, not the Assembly Beam2 part PDF.

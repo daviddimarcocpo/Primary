@@ -1,4 +1,4 @@
-# Version 0.1.3 validation
+# Version 0.1.4 validation
 
 ## Reference evidence
 
@@ -15,7 +15,7 @@ User-supplied STEP, recorded two-minute manual workflow, final TPC, and Producti
 
 Core and syntax tests run using official PowerShell 7.4.6 for Linux. Its download was checked against the release's official SHA-256 manifest. This tests the PowerShell core against the actual supplied files, but is not a Windows PowerShell 5.1 runtime test. The helper uses PowerShell 5.1-compatible syntax and Windows built-in assemblies.
 
-**48 checks passed**, including starter-shortcut routing regressions, compilation of the native Win32 adapter, and tests that reject missing/hidden/disabled commands or a wrong process/toolbar identity. The test transcript is included as `TEST RESULTS.txt` in the helper ZIP. Release file checksums are included as `SHA256SUMS.txt`. No test result should be interpreted as a live desktop or machine test.
+**51 checks passed**, including starter-shortcut routing regressions, compilation of the native Win32 adapter, and tests that reject missing/hidden/disabled commands or a wrong process/toolbar identity. The test transcript is included as `TEST RESULTS.txt` in the helper ZIP. Release file checksums are included as `SHA256SUMS.txt`. No test result should be interpreted as a live desktop or machine test.
 
 ## Local acceptance still required
 
@@ -41,3 +41,7 @@ Privilege mismatch detection and enhanced control-report output are also impleme
 ## Save-beside-input workflow
 
 Output guidance and pickers now follow TRUMPF's default input-folder save behavior. Three added regression checks cover the working-copy folder before TEOX registration, the registered TEOX folder, and matching the PDF picker to the selected TPC folder. Existing generated folders are neither removed nor required. No desktop toolbar behavior changed in this update; Import/Identify remain subject to local verification.
+
+## Filename mismatch diagnosis and correction
+
+Mismatch messages now identify the saved helper name, expected filenames, and selected filenames. The existing wrong-PDF-name test verifies those diagnostic values. Three additional checks cover saving a corrected helper name while preserving the job directory and staged CAD, clearing earlier package approval, and rejecting invalid names. The Windows input dialog and label rendering remain subject to local verification. No filename or TPC content is changed by correcting the helper's name.

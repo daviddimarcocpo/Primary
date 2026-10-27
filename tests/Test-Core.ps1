@@ -123,7 +123,7 @@ try {
     Reject { Test-TubePackage $job $ReferenceTpc $badPdf } 'Fake PDF file is rejected' 'signature'
     $wrongName=Join-Path $temp 'DifferentJob.pdf'
     Copy-Item -LiteralPath $ReferencePdf -Destination $wrongName
-    Reject { Test-TubePackage $job $ReferenceTpc $wrongName } 'PDF with wrong job filename is rejected' 'filenames'
+    Reject { Test-TubePackage $job $ReferenceTpc $wrongName } 'PDF with wrong job filename is rejected' '(?s)Helper job name: \[CODEX TEST 10262026 SQ6X25\].*Selected TPC: \[CODEX TEST 10262026 SQ6X25\.tpc\].*Selected PDF: \[DifferentJob\.pdf\]'
 
     $cadSource=Get-Item -LiteralPath $ReferenceCad
     $originalHash=(Get-FileHash -LiteralPath $cadSource.FullName).Hash
@@ -138,6 +138,13 @@ try {
     Save-TubeJob $reopened
     Reject { Open-TubeJob (Join-Path $staged.Directory 'job.json') } 'Resume rejects working-copy path outside the job folder' 'outside'
     Save-TubeJob $staged
+    $originalDirectory=$staged.Directory
+    $staged.PackageReport=[pscustomobject]@{MetadataChecks='Passed'}
+    Set-TubeJobName $staged 'Revised nested job'
+    $renamed=Open-TubeJob (Join-Path $staged.Directory 'job.json')
+    Check ($renamed.Name -ceq 'Revised nested job' -and $renamed.Directory -ceq $originalDirectory -and (Test-Path -LiteralPath $renamed.Parts[0].WorkingCopy)) 'Helper job name can be corrected without moving the job or CAD files'
+    Check ($null -eq $renamed.PackageReport -and $renamed.State -eq 'Job name changed; output review pending') 'Changing the helper name clears prior package approval'
+    Reject { Set-TubeJobName $staged '../invalid' } 'Invalid helper name correction is rejected'
     $another=New-TubeJob 'Staging test [1]' $temp $spec 240
     Check ($another.Directory -cne $staged.Directory) 'Repeated job preparation uses separate folders'
     Check ((Get-TubeOutputDirectory $another) -ceq (Split-Path -Parent $another.Parts[0].WorkingCopy)) 'Output picker defaults beside the working input before TEOX registration'

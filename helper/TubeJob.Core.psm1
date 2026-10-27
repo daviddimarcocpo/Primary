@@ -271,6 +271,19 @@ function Save-TubeJob {
     Move-Item -LiteralPath $temp -Destination $destination -Force
 }
 
+function Set-TubeJobName {
+    param($Job,[Parameter(Mandatory)][string]$Name)
+    $null=Test-JobName $Name
+    $oldName=$Job.Name; $oldState=$Job.State; $oldReport=$Job.PackageReport
+    try {
+        $Job.Name=$Name; $Job.State='Job name changed; output review pending'; $Job.PackageReport=$null
+        Save-TubeJob $Job
+    } catch {
+        $Job.Name=$oldName; $Job.State=$oldState; $Job.PackageReport=$oldReport
+        throw
+    }
+}
+
 function Open-TubeJob {
     param([Parameter(Mandatory)][string]$ManifestPath)
     $manifest = Get-Item -LiteralPath $ManifestPath
@@ -306,7 +319,19 @@ function Test-TubePackage {
     $initialTpcHash = (Get-FileHash -LiteralPath $tpc.FullName -Algorithm SHA256).Hash
     $initialPdfHash = (Get-FileHash -LiteralPath $pdf.FullName -Algorithm SHA256).Hash
     if ($tpc.Extension -ine '.tpc' -or $pdf.Extension -ine '.pdf') { throw 'Select a TPC and a PDF.' }
-    if ($tpc.BaseName -ine $Job.Name -or $pdf.BaseName -ine $Job.Name) { throw 'Both final filenames must match the job name.' }
+    if ($tpc.BaseName -ine $Job.Name -or $pdf.BaseName -ine $Job.Name) {
+        throw @"
+The selected filenames do not match the helper job name.
+
+Helper job name: [$($Job.Name)]
+Expected TPC: [$($Job.Name).tpc]
+Selected TPC: [$($tpc.Name)]
+Expected PDF: [$($Job.Name).pdf]
+Selected PDF: [$($pdf.Name)]
+
+Choose the final nested job's matching files. If the helper job name is wrong, use Change helper job name. Changing a filename alone does not change the job stored inside a TPC.
+"@
+    }
     if ($pdf.Length -lt 8 -or $pdf.Length -gt 134217728) { throw 'PDF size is invalid or exceeds inspection limits.' }
     $stream = [IO.File]::OpenRead($pdf.FullName)
     try {
@@ -363,4 +388,4 @@ Complete your usual TRUMPF simulation and operator release before production.
     return $completed
 }
 
-Export-ModuleMember -Function ConvertFrom-TrumpfCsv,Read-TrumpfTable,Get-TpcSummary,Test-JobName,Get-TubeDesignShortcutCandidates,Assert-TubeToolbarState,Get-TubeOutputDirectory,New-TubeJob,Save-TubeJob,Open-TubeJob,Test-TubePackage,Copy-CheckedPackage
+Export-ModuleMember -Function ConvertFrom-TrumpfCsv,Read-TrumpfTable,Get-TpcSummary,Test-JobName,Get-TubeDesignShortcutCandidates,Assert-TubeToolbarState,Get-TubeOutputDirectory,New-TubeJob,Save-TubeJob,Set-TubeJobName,Open-TubeJob,Test-TubePackage,Copy-CheckedPackage

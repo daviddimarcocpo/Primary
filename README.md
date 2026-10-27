@@ -2,7 +2,7 @@
 
 A local Windows assistant for preparing TRUMPF tube-laser jobs and collecting the **Production Package PDF and nested TPC**. Built around the supplied Tube Design 17 / Programming Tube Auto Run 7.0.1 demonstration for TruLaser Tube 7000 (T12).
 
-**Version 0.1.3 is an assisted workflow, not unattended CAD-to-machine programming.** It does not require a TRUMPF API license. Its Import and Identify commands use ordinary visible Tube Design controls and still require a first test on the programming workstation. Auto Run, nesting, contour selection, and export remain guided operator actions in this release. No simulation, machine operation, network transfer, or USB copy is performed.
+**Version 0.1.4 is an assisted workflow, not unattended CAD-to-machine programming.** It does not require a TRUMPF API license. Its Import and Identify commands use ordinary visible Tube Design controls and still require a first test on the programming workstation. Auto Run, nesting, contour selection, and export remain guided operator actions in this release. No simulation, machine operation, network transfer, or USB copy is performed.
 
 ## First run
 
@@ -67,3 +67,9 @@ Each cloud task already has an isolated checkout. Use that checkout; do not crea
 ## Output locations in 0.1.3
 
 TRUMPF retains its normal save-beside-input behavior throughout the workflow. The helper no longer creates or directs exports into a separate generated folder. Export pickers follow the registered TEOX location (or the CAD working folder before registration). Existing job folders, including any legacy generated folder, remain compatible. New TPC/PDF files can be checked anywhere inside the current helper job; they need not be moved into a specific subfolder. Collection retains an additional checked pair in deliverables without moving or rewriting the native TRUMPF outputs.
+
+## Package naming in 0.1.4
+
+The helper compares both selected file basenames with its own saved job name, then checks the job identity inside the TPC. The output tab now displays both expected filenames, and a mismatch error includes the helper name and actual selected filenames. Select the named final job PDF/TPC, rather than the individual part report.
+
+If the helper name was entered incorrectly while preparing the job, choose Change helper job name on the output tab. Enter the intended nested job name exactly. This saves the corrected helper metadata without renaming the job folder, CAD, exports, or TPC contents. It clears previous package approval and PDF acknowledgement, so review and checks must be repeated. A different job, part quantity, machine, or internal TPC job identity still fails validation. Package-check errors are also written to helper.log.
