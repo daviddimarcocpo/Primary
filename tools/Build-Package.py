@@ -8,7 +8,7 @@ from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 import re
 
-version = "0.2.0"
+version = "0.3.0"
 
 root = Path(__file__).resolve().parents[1]
 out = root / "artifacts"

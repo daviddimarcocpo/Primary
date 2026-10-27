@@ -1,53 +1,31 @@
-# Version 0.2.0 validation
+# Version 0.3.0 validation
 
-## Reference evidence
+## Scope
 
-User-supplied STEP, recorded two-minute manual workflow, final TPC, and Production Package PDF:
+Current acceptance target: import STP/STEP/SLDPRT in local Tube Design and export a fresh single-part TEOX. Auto Run and nesting work is explicitly paused. Its earlier code and saved metadata are retained but those controls are not presented in the current interface.
 
-- Job: CODEX TEST 10262026 SQ6X25
-- Machine: TruLaser Tube 7000 (T12)
-- Part: Assembly Beam2, quantity 10
-- PDF reports two 240-inch stock tubes and estimated job time 00:09:25
-- Reference ZIP CRC check passed using Python `zipfile.testzip()`
-- Original uploads are kept outside this repository and are not included in the helper distribution.
+## Evidence used
 
-## Checks run in the cloud
+- User's Tube Design 17.0.56 screenshots, manual workflow recording, native toolbar/UI reports, and original Assembly Beam2 STEP/SLDPRT/TEOX exports.
+- Recording at approximately 00:36 shows the Export production data tooltip over the toolbar location mapped to 41737 in the archived toolbar tree (production data toolbar 59431).
+- Approximately 00:38 shows the save prerequisite; 00:40 shows the exact model-save dialog title; 00:42 shows the export panel.
+- The training workbook documents automatic creation of a model-named subfolder on first save.
+- The user confirmed manual import after using the correct TRUMPF starter, helper Identify opening, and prior assisted package collection. Direct helper import and this new export path remain unverified locally.
 
-Core and syntax tests run using official PowerShell 7.4.6 for Linux. Its download was checked against the release's official SHA-256 manifest. This tests the PowerShell core against the actual supplied files, but is not a Windows PowerShell 5.1 runtime test. The helper uses PowerShell 5.1-compatible syntax and Windows built-in assemblies.
+## Cloud checks
 
-**69 checks passed**, including starter-shortcut routing regressions, compilation of the native Win32 adapter, and tests that reject missing/hidden/disabled commands or a wrong process/toolbar identity. The test transcript is included as `TEST RESULTS.txt` in the helper ZIP. Release file checksums are included as `SHA256SUMS.txt`. No test result should be interpreted as a live desktop or machine test.
+90 checks passed using PowerShell 7.4.6 on Linux. All helper files parse and the C# Win32 adapter compiles, without calling its Windows entry points. Actual uploaded TEOX metadata, BREP and binary STL were read. Tests cover exact document titles, candidate paths for all three filename extensions, unchanged/changed exports in both default locations, ambiguous outputs, wrong provenance, invalid units, empty or multiple geometries, short STL, and prohibited XML DTDs. Previous metadata/staging/resume/final-package and Auto Run file regressions also pass.
 
-## Local acceptance still required
+Extension tests are output-path planning tests, not CAD conversion or live import tests. No source-file modification, local TRUMPF launch, live save/export, engineering geometry comparison, simulation, or machine operation was tested in the cloud. Original customer CAD/NC files are not shipped in the ZIP.
 
-1. Launch the unsigned helper under the workstation's existing execution policy.
-2. Create a fresh sample job and confirm originals are preserved.
-3. Try Import working copy and confirm the expected model loads. If that works, try Identify profile; confirm the right profile yourself.
-4. Apply the recorded marking, export/register TEOX, and complete programming/nesting through the guided steps.
-5. Export a new named PDF/TPC pair, review the PDF and nest, and run Check and collect package.
-6. Complete the shop's normal simulation and operator release. No machine operation has been tested from this environment.
+## Required Windows acceptance
 
-The new Auto Run file-chooser handoff and calculation-output watch are implemented but require local Windows acceptance. Opening + and selecting the machine remain operator actions.
+1. Resume or prepare the known sample with Tube Design started normally.
+2. Test native file dialog import and inspect the actual loaded model.
+3. Confirm profile and marking in Tube Design.
+4. Test Begin TEOX export, save-prerequisite handling and Fill model save dialog.
+5. Confirm intended export selection/settings in Tube Design.
+6. Verify that a genuinely fresh TEOX is saved in its native location and the helper reports a successful container check.
+7. Inspect/resume after a missing control, overwrite prompt or timeout without accepting unrelated dialogs automatically.
 
-## Startup correction
-
-The initial helper preferred sldworks.exe over the TRUMPF starter. A local test subsequently reported "Starter application not run correctly", including for manual import. Version 0.1.1 removes this direct launch and shell-opens the installed normal Tube Design shortcut, retaining startup arguments and working directory. Automated tests verify starter selection, rejection of direct sldworks shortcuts, retention of route settings, and deduplication. Windows startup and successful CAD import remain pending local confirmation.
-
-## Toolbar lookup correction
-
-The new user-supplied report shows both expected toolbar names and native control IDs, but zero button children. This supports a missing-accessibility-children diagnosis, not a conclusion that command IDs changed. Version 0.1.2 queries TB_COMMANDTOINDEX and TB_GETSTATE on a uniquely matched visible native toolbar before using the existing WM_COMMAND route. Those scalar queries use no remote process memory. Tests compile the C# adapter without invoking its Windows entry points and exercise rejection conditions for the state validator. The actual native query and resulting Import/Identify operations remain unverified on Windows.
-
-Privilege mismatch detection and enhanced control-report output are also implemented but require local Windows verification.
-
-## Save-beside-input workflow
-
-Output guidance and pickers now follow TRUMPF's default input-folder save behavior. Three added regression checks cover the working-copy folder before TEOX registration, the registered TEOX folder, and matching the PDF picker to the selected TPC folder. Existing generated folders are neither removed nor required. No desktop toolbar behavior changed in this update; Import/Identify remain subject to local verification.
-
-## Filename mismatch diagnosis and correction
-
-Mismatch messages now identify the saved helper name, expected filenames, and selected filenames. The existing wrong-PDF-name test verifies those diagnostic values. Three additional checks cover saving a corrected helper name while preserving the job directory and staged CAD, clearing earlier package approval, and rejecting invalid names. The Windows input dialog and label rendering remain subject to local verification. No filename or TPC content is changed by correcting the helper's name.
-
-## Auto Run stage validation
-
-Eighteen added checks cover the handoff context, real uploaded TUBX metadata, fresh output acceptance, rejection of stale/missing/changed input files, unchanged pre-request outputs even within timestamp tolerance, wrong part/machine/profile, nested TPC at the individual-part stage, reported TUBX processing errors, prohibited XML DTDs, and incomplete files. These checks use temporary copies of the supplied TEOX/TUBX and program content from the supplied TPC; temporary test programs are not distributed as production outputs. PDF contents are not validated by the watcher.
-
-The previous assisted package collection and folder contents were confirmed by the user on the workstation. Identify profile opening was also confirmed. This does not establish that the new Auto Run controls work: verify the tab/machine/chooser selectors, file submission, normal TRUMPF calculation, output watcher timer, and stop/timeout behavior locally. No live Windows automation ran in the cloud tests.
+The watcher/controls must not be called fully working until those local steps are confirmed. A successful TEOX container check is not a downstream machine-readiness certification.

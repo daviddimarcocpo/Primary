@@ -24,6 +24,21 @@ public static class TubeJobNative {
     [DllImport("user32.dll")] static extern bool IsWindowEnabled(IntPtr h);
     delegate bool EnumWindowProc(IntPtr h, IntPtr p);
     [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr h, EnumWindowProc callback, IntPtr p);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowProc callback, IntPtr p);
+    [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr h, uint command);
+    [DllImport("user32.dll")] static extern IntPtr GetDlgItem(IntPtr h, int id);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+    [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] struct COMBOBOXINFO {
+        public int cbSize; public RECT rcItem, rcButton; public int stateButton;
+        public IntPtr hwndCombo, hwndItem, hwndList;
+    }
+    [DllImport("user32.dll")] static extern bool GetComboBoxInfo(IntPtr h, ref COMBOBOXINFO info);
+    [DllImport("user32.dll")] static extern bool IsChild(IntPtr parent, IntPtr child);
+    [DllImport("user32.dll", EntryPoint="SendMessageTimeoutW", CharSet=CharSet.Unicode, SetLastError=true)]
+    static extern IntPtr SendText(IntPtr h, uint m, UIntPtr w, string text, uint flags, uint timeout, out UIntPtr result);
+    [DllImport("user32.dll", EntryPoint="SendMessageTimeoutW", CharSet=CharSet.Unicode, SetLastError=true)]
+    static extern IntPtr ReadText(IntPtr h, uint m, UIntPtr w, StringBuilder text, uint flags, uint timeout, out UIntPtr result);
     [DllImport("user32.dll", SetLastError=true)] static extern IntPtr SendMessageTimeout(IntPtr h, uint m, UIntPtr w, IntPtr l, uint flags, uint timeout, out UIntPtr result);
     [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
@@ -39,6 +54,70 @@ public static class TubeJobNative {
             if (!GetTokenInformation(token, 20, out value, 4, out length)) return "Unknown (" + Marshal.GetLastWin32Error() + ")";
             return value != 0 ? "Elevated" : "Standard";
         } finally { if (token != IntPtr.Zero) CloseHandle(token); CloseHandle(process); }
+    }
+    static string Caption(IntPtr h) { var text=new StringBuilder(2048); GetWindowText(h,text,text.Capacity); return text.ToString(); }
+    static string Class(IntPtr h) { var text=new StringBuilder(256); GetClassName(h,text,text.Capacity); return text.ToString(); }
+    static bool OwnedBy(IntPtr candidate, IntPtr root) {
+        if (IsChild(root,candidate)) return true;
+        for (int depth=0;depth<16 && candidate!=IntPtr.Zero;depth++) {
+            candidate=GetWindow(candidate,4);
+            if (candidate==root) return true;
+        }
+        return false;
+    }
+    public static bool WindowEnabled(IntPtr h) { return IsWindowEnabled(h); }
+    public static IntPtr[] FindDialogs(IntPtr root,int expectedPid,string title) {
+        var found=new HashSet<IntPtr>();
+        EnumWindowProc callback=delegate(IntPtr h,IntPtr unused) {
+            uint pid; GetWindowThreadProcessId(h,out pid);
+            if (pid==expectedPid && Class(h)=="#32770" && Caption(h)==title && IsWindowVisible(h) && IsWindowEnabled(h) && OwnedBy(h,root)) found.Add(h);
+            return true;
+        };
+        EnumWindows(callback,IntPtr.Zero); EnumChildWindows(root,callback,IntPtr.Zero); GC.KeepAlive(callback);
+        var result=new IntPtr[found.Count]; found.CopyTo(result); return result;
+    }
+    public static IntPtr FillFileDialog(IntPtr dialog,int expectedPid,string title,string buttonCaption,string path) {
+        uint pid; GetWindowThreadProcessId(dialog,out pid);
+        if (pid!=expectedPid || Class(dialog)!="#32770" || Caption(dialog)!=title || !IsWindowVisible(dialog) || !IsWindowEnabled(dialog))
+            throw new InvalidOperationException("File dialog identity changed.");
+        IntPtr field=GetDlgItem(dialog,1148);
+        if (field==IntPtr.Zero) {
+            var fields=new List<IntPtr>();
+            EnumWindowProc find=delegate(IntPtr h,IntPtr unused) {
+                uint owner; GetWindowThreadProcessId(h,out owner);
+                string cls=Class(h);
+                if (owner==expectedPid && GetDlgCtrlID(h)==1148 && IsWindowVisible(h) &&
+                    (cls=="ComboBox" || cls=="ComboBoxEx32" || cls=="Edit")) fields.Add(h);
+                return true;
+            };
+            EnumChildWindows(dialog,find,IntPtr.Zero);GC.KeepAlive(find);
+            if (fields.Count!=1) throw new InvalidOperationException("Native file name control 1148 is missing or ambiguous.");
+            field=fields[0];
+        }
+        IntPtr edit=field;
+        if (Class(field)=="ComboBoxEx32") {
+            edit=new IntPtr(Query(field,0x407,0));
+        } else if (Class(field)=="ComboBox") {
+            var info=new COMBOBOXINFO(); info.cbSize=Marshal.SizeOf(typeof(COMBOBOXINFO));
+            if (!GetComboBoxInfo(field,ref info)) throw new InvalidOperationException("File name combo edit could not be identified.");
+            edit=info.hwndItem;
+        }
+        uint editPid; GetWindowThreadProcessId(edit,out editPid);
+        if (edit==IntPtr.Zero || editPid!=expectedPid || Class(edit)!="Edit" || !IsChild(dialog,edit) || !IsWindowEnabled(edit))
+            throw new InvalidOperationException("Native file name edit identity could not be verified.");
+        IntPtr button=GetDlgItem(dialog,1);
+        uint buttonPid; GetWindowThreadProcessId(button,out buttonPid);
+        if (button==IntPtr.Zero || buttonPid!=expectedPid || Class(button)!="Button" ||
+            Caption(button).Replace("&","")!=buttonCaption || !IsWindowVisible(button) || !IsWindowEnabled(button))
+            throw new InvalidOperationException("Expected file dialog button was not found.");
+        UIntPtr result;
+        // WM_SETTEXT/WM_GETTEXT are marshalled by Windows; no remote-memory allocation.
+        if (SendText(edit,0xC,UIntPtr.Zero,path,0x22,1000,out result)==IntPtr.Zero || result==UIntPtr.Zero)
+            throw new InvalidOperationException("Windows rejected the file name entry.");
+        var actual=new StringBuilder(path.Length+4);
+        if (ReadText(edit,0xD,(UIntPtr)(uint)actual.Capacity,actual,0x22,1000,out result)==IntPtr.Zero || actual.ToString()!=path)
+            throw new InvalidOperationException("The file name readback does not match the working-copy path.");
+        return button;
     }
     public sealed class ToolbarState {
         public IntPtr Handle;
@@ -135,9 +214,9 @@ function Get-ImportDialog {
 }
 
 function Invoke-TubeToolbar {
-    param($Process, [ValidateSet('Import','Identify')][string]$Command)
-    $commandId = if ($Command -eq 'Import') { 41699 } else { 41706 }
-    $toolbarName = if ($Command -eq 'Import') { 'Standard' } else { 'Tubes' }
+    param($Process, [ValidateSet('Import','Identify','Export')][string]$Command)
+    $commandId = switch ($Command) { 'Import' {41699}; 'Identify' {41706}; 'Export' {41737} }
+    $toolbarName = switch ($Command) { 'Import' {'Standard'}; 'Identify' {'Tubes'}; 'Export' {'production data'} }
     $root = [System.Windows.Automation.AutomationElement]::FromHandle($Process.MainWindowHandle)
     if (-not $root.Current.IsEnabled) { throw 'Tube Design has an open dialog. Finish or cancel it manually before continuing.' }
     $toolbarCondition = New-Object System.Windows.Automation.PropertyCondition(
@@ -156,7 +235,7 @@ function Invoke-TubeToolbar {
     if ($buttons.Count -ne 1) {
         # Current reports expose ToolbarWindow32 as a Pane with no UIA children.
         # Query scalar toolbar state; no remote memory, coordinate guesses, or API license calls.
-        $toolbarId=if ($Command -eq 'Import') { 59424 } else { 59430 }
+        $toolbarId=switch ($Command) { 'Import' {59424}; 'Identify' {59430}; 'Export' {59431} }
         $nativeStates=@([TubeJobNative]::InspectToolbar($Process.MainWindowHandle,$Process.Id,$toolbarId,$commandId))
         if ($nativeStates.Count -ne 1) { throw "The $Command toolbar is missing, hidden, or ambiguous in both accessibility and native inspection. No command was sent." }
         Assert-TubeToolbarState $nativeStates[0] $Process.Id $toolbarId
@@ -176,45 +255,21 @@ function Invoke-TubeImport {
     if ($file.Extension -notmatch '^(?i:\.stp|\.step|\.sldprt)$') { throw 'Unsupported CAD file.' }
     $process = Get-TubeDesignWindow
     Assert-TubeAccess $process
-    $dialog = Get-ImportDialog $process
-    if ($null -eq $dialog) {
+    $title='Select the model to be imported.'
+    $dialogs=@([TubeJobNative]::FindDialogs($process.MainWindowHandle,$process.Id,$title))
+    if ($dialogs.Count -eq 0) {
+        if (Test-TubeDocumentTitle $process.MainWindowTitle $file.BaseName) { throw 'This part is already open. Continue with Identify profile, or close the part before testing a new import.' }
         Invoke-TubeToolbar $process Import
         $deadline = [DateTime]::UtcNow.AddSeconds(6)
         do {
             Start-Sleep -Milliseconds 200
-            $dialog = Get-ImportDialog $process
-        } until ($null -ne $dialog -or [DateTime]::UtcNow -ge $deadline)
+            $dialogs=@([TubeJobNative]::FindDialogs($process.MainWindowHandle,$process.Id,$title))
+        } until ($dialogs.Count -gt 0 -or [DateTime]::UtcNow -ge $deadline)
     }
-    if ($null -eq $dialog) { throw 'Import dialog did not appear. Inspect Tube Design for a prompt, or open Import manually and retry.' }
-    if ($dialog.Current.ProcessId -ne $process.Id) { throw 'Import dialog belongs to an unexpected process.' }
-    $controls = $dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
-    $editMatches = @($controls | Where-Object {
-        $_.Current.AutomationId -eq '1148' -and $_.Current.ClassName -eq 'Edit' -and
-        $_.Current.IsEnabled -and -not $_.Current.IsOffscreen
-    })
-    if ($editMatches.Count -ne 1) { throw 'The filename field is missing or ambiguous. No filename was entered.' }
-    $value = $null
-    if (-not $editMatches[0].TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$value)) {
-        throw 'Filename field does not support direct value entry. Select the working copy manually.'
-    }
-    $value.SetValue($file.FullName)
-    if ($value.Current.Value -cne $file.FullName) { throw 'The filename field did not retain the expected working-copy path.' }
-    # Native ID/class are used because archived captures exposed this button as
-    # both ControlType.Button and ControlType.Pane.
-    $buttons = @($dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition) | Where-Object {
-        $_.Current.Name -eq 'Import' -and $_.Current.AutomationId -eq '1' -and
-        $_.Current.ClassName -eq 'Button' -and $_.Current.IsEnabled -and -not $_.Current.IsOffscreen
-    })
-    if ($buttons.Count -ne 1) { throw 'Import button is missing or ambiguous. The path is filled; inspect the dialog manually.' }
-    $buttonHandle = [IntPtr]$buttons[0].Current.NativeWindowHandle
-    $dialogHandle = [IntPtr]$dialog.Current.NativeWindowHandle
-    $nativeProcess = [uint32]0
-    [void][TubeJobNative]::GetWindowThreadProcessId($buttonHandle,[ref]$nativeProcess)
-    if ($buttonHandle -eq [IntPtr]::Zero -or $dialogHandle -eq [IntPtr]::Zero -or
-        $nativeProcess -ne $process.Id -or [TubeJobNative]::GetDlgCtrlID($buttonHandle) -ne 1) {
-        throw 'Import button native identity could not be verified.'
-    }
+    if ($dialogs.Count -ne 1) { throw 'A unique Tube Design import dialog did not appear. Inspect Tube Design, or open Import manually and retry.' }
+    $dialogHandle=$dialogs[0]
     Set-VerifiedTubeForeground $dialogHandle $process.Id
+    $buttonHandle=[TubeJobNative]::FillFileDialog($dialogHandle,$process.Id,$title,'Import',$file.FullName)
     if (-not [TubeJobNative]::PostMessage($buttonHandle, 0xF5, [IntPtr]::Zero, [IntPtr]::Zero)) { throw 'Windows rejected the import request.' }
     return 'Import requested for the staged working copy. Inspect the loaded model; this is not confirmation that import or tube identification succeeded.'
 }
@@ -225,11 +280,36 @@ function Invoke-TubeIdentify {
     $process = Get-TubeDesignWindow
     Assert-TubeAccess $process
     $baseName = [IO.Path]::GetFileNameWithoutExtension($InputPath)
-    if ($process.MainWindowTitle.IndexOf($baseName,[StringComparison]::OrdinalIgnoreCase) -lt 0) {
+    if (-not (Test-TubeDocumentTitle $process.MainWindowTitle $baseName)) {
         throw 'The active document title does not match this part. Select the correct working copy manually.'
     }
     Invoke-TubeToolbar $process Identify
     return 'Identify profile requested. Select the body and review material, dimensions, profile, and direction; confirm in Tube Design.'
+}
+
+function Invoke-TubeExport {
+    param([string]$InputPath)
+    Initialize-TubeDesktop
+    $process=Get-TubeDesignWindow; Assert-TubeAccess $process
+    $name=[IO.Path]::GetFileNameWithoutExtension($InputPath)
+    if (-not (Test-TubeDocumentTitle $process.MainWindowTitle $name)) { throw 'The active Tube Design document is not the selected part.' }
+    $request=New-TeoxExportRequest $InputPath
+    Invoke-TubeToolbar $process Export
+    [pscustomobject]@{Message='Export production data requested. Inspect Tube Design: confirm its save prompt if shown, then use Fill model save dialog. Review export selection and accept its green check. Watching for the new TEOX.';Request=$request}
+}
+
+function Invoke-TubeModelSave {
+    param([string]$InputPath)
+    Initialize-TubeDesktop
+    $process=Get-TubeDesignWindow; Assert-TubeAccess $process
+    $title='Name of the tube design model to be stored'
+    $dialogs=@([TubeJobNative]::FindDialogs($process.MainWindowHandle,$process.Id,$title))
+    if ($dialogs.Count -ne 1) { throw 'Open the recorded model-save dialog first by accepting the save prerequisite in Tube Design. No generic dialog was accepted.' }
+    $target=[IO.Path]::ChangeExtension($InputPath,'.SLDPRT')
+    Set-VerifiedTubeForeground $dialogs[0] $process.Id
+    $button=[TubeJobNative]::FillFileDialog($dialogs[0],$process.Id,$title,'Save',$target)
+    if (-not [TubeJobNative]::PostMessage($button,0xF5,[IntPtr]::Zero,[IntPtr]::Zero)) { throw 'Windows rejected the model Save request.' }
+    return 'Model Save requested in the working-copy folder. Inspect any overwrite prompt yourself. Confirm export settings and accept the export green check in Tube Design.'
 }
 
 function Invoke-AutoRunImport {
@@ -322,7 +402,7 @@ function Invoke-AutoRunImport {
 }
 
 function Save-TubeControls {
-    param([string]$OutputPath)
+    param([string]$OutputPath,[switch]$TubeDesignOnly)
     Initialize-TubeDesktop
     $lines = New-Object 'System.Collections.Generic.List[string]'
     $lines.Add('Helper privilege: '+[TubeJobNative]::Elevation([Diagnostics.Process]::GetCurrentProcess().Id))
@@ -356,14 +436,14 @@ function Save-TubeControls {
     }
     foreach ($process in @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
         ($_.ProcessName -eq 'sldworks' -and $_.MainWindowTitle -like 'Tube Design*') -or
-        $_.ProcessName -eq 'ProgrammingTubeAutoRun'
+        ($_.ProcessName -eq 'ProgrammingTubeAutoRun' -and -not $TubeDesignOnly)
     })) {
         if ($process.MainWindowHandle -eq 0) { continue }
         $lines.Add('APPLICATION: ' + $process.ProcessName + ' | ' + $process.MainWindowTitle)
         $lines.Add('Application privilege: '+[TubeJobNative]::Elevation($process.Id))
         Read-Controls ([System.Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)) 0
         if ($process.ProcessName -eq 'sldworks') {
-            foreach ($mapping in @(@{Name='Import';Toolbar=59424;Command=41699},@{Name='Identify';Toolbar=59430;Command=41706})) {
+            foreach ($mapping in @(@{Name='Import';Toolbar=59424;Command=41699},@{Name='Identify';Toolbar=59430;Command=41706},@{Name='Export';Toolbar=59431;Command=41737})) {
                 try {
                     $states=@([TubeJobNative]::InspectToolbar($process.MainWindowHandle,$process.Id,$mapping.Toolbar,$mapping.Command))
                     if ($states.Count -eq 1) {
@@ -379,4 +459,4 @@ function Save-TubeControls {
     return 'Saved application control names only. No desktop screenshots or unrelated windows were captured.'
 }
 
-Export-ModuleMember -Function Invoke-TubeImport,Invoke-TubeIdentify,Invoke-AutoRunImport,Save-TubeControls
+Export-ModuleMember -Function Invoke-TubeImport,Invoke-TubeIdentify,Invoke-TubeExport,Invoke-TubeModelSave,Invoke-AutoRunImport,Save-TubeControls

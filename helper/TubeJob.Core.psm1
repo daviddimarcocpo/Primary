@@ -251,6 +251,103 @@ function Test-JobName {
     return $true
 }
 
+function Test-TubeDocumentTitle {
+    param([string]$Title,[string]$PartName)
+    if ($Title -notmatch ' - \[(?<document>.+)\]\s*$') { return $false }
+    $document=($Matches['document'] -replace '\s*\*\s*$','').Trim()
+    return ($document -imatch ('^'+[regex]::Escape($PartName)+'(?:\.(?:SLDPRT|STEP|STP))?$'))
+}
+
+function New-TeoxExportRequest {
+    param([string]$InputPath)
+    $file=Get-Item -LiteralPath $InputPath
+    if ($file.Extension -notmatch '^(?i:\.stp|\.step|\.sldprt)$') { throw 'Choose a supported CAD working copy.' }
+    # Tube Design may create a model-named child folder on the first Save.
+    $candidates=@((Join-Path $file.DirectoryName ($file.BaseName+'.teox')),
+        (Join-Path (Join-Path $file.DirectoryName $file.BaseName) ($file.BaseName+'.teox')))
+    $prior=@(foreach ($path in $candidates) {
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            $item=Get-Item -LiteralPath $path
+            if ($item.Length -gt 134217728) { throw 'An existing TEOX exceeds inspection limits.' }
+            [pscustomobject]@{Path=$path;Exists=$true;Length=$item.Length;WriteTicks=$item.LastWriteTimeUtc.Ticks;SHA256=(Get-FileHash -LiteralPath $path).Hash}
+        } else { [pscustomobject]@{Path=$path;Exists=$false} }
+    })
+    [pscustomobject]@{Kind='TubeDesignExport';PartName=$file.BaseName;InputPath=$file.FullName;
+        RequestedUtc=[DateTime]::UtcNow.ToString('o');CandidatePaths=$candidates;PriorOutputs=$prior}
+}
+
+function Get-TeoxSummary {
+    param([string]$Path,[string]$ExpectedPartName)
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $file=Get-Item -LiteralPath $Path
+    if ($file.Length -le 0 -or $file.Length -gt 134217728) { throw 'TEOX is empty or exceeds 128 MiB.' }
+    $hash=(Get-FileHash -LiteralPath $file.FullName).Hash
+    $archive=[IO.Compression.ZipFile]::OpenRead($file.FullName)
+    try {
+        if ($archive.Entries.Count -eq 0 -or $archive.Entries.Count -gt 128) { throw 'Unsupported TEOX entry count.' }
+        $seen=@{};$total=[long]0
+        foreach ($entry in $archive.Entries) {
+            $name=$entry.FullName.Replace('\','/');$total+=$entry.Length
+            if ($seen.ContainsKey($name) -or $name -match '(^/|(^|/)\.\.(/|$)|:)' -or $entry.Length -gt 67108864 -or $total -gt 134217728) { throw 'TEOX contains duplicate/unsafe entries or exceeds inspection limits.' }
+            $seen[$name]=$true
+        }
+        $entry=$archive.GetEntry('ColladaData.dae')
+        if ($null -eq $entry) { throw 'TEOX has no ColladaData.dae.' }
+        $settings=New-Object Xml.XmlReaderSettings
+        $settings.DtdProcessing=[Xml.DtdProcessing]::Prohibit;$settings.XmlResolver=$null;$settings.MaxCharactersInDocument=67108864
+        $stream=$entry.Open();$reader=[Xml.XmlReader]::Create($stream,$settings)
+        try { $xml=New-Object Xml.XmlDocument;$xml.XmlResolver=$null;$xml.Load($reader) } finally { $reader.Dispose();$stream.Dispose() }
+        if ($xml.DocumentElement.LocalName -cne 'COLLADA') { throw 'TEOX does not contain a COLLADA model.' }
+        $geometries=$xml.SelectNodes('/*[local-name()="COLLADA"]/*[local-name()="library_geometries"]/*[local-name()="geometry"]')
+        if ($geometries.Count -ne 1) { throw 'This workflow requires exactly one exported tube geometry per input part.' }
+        $geometry=$geometries[0]
+        $body=$geometry.SelectSingleNode('./*[local-name()="brep" or local-name()="mesh"]')
+        if ($null -eq $body -or $body.SelectNodes('./*').Count -eq 0) { throw 'TEOX geometry is empty or unsupported.' }
+        $source=$xml.SelectSingleNode('/*[local-name()="COLLADA"]/*[local-name()="asset"]/*[local-name()="contributor"]/*[local-name()="source_data"]')
+        $unit=$xml.SelectSingleNode('/*[local-name()="COLLADA"]/*[local-name()="asset"]/*[local-name()="unit"]')
+        if ($null -eq $source -or $null -eq $unit) { throw 'TEOX model provenance or units are missing.' }
+        $sourceName=($source.InnerText -split '[\\/]')[-1]
+        if ([IO.Path]::GetFileNameWithoutExtension($sourceName) -ine $ExpectedPartName) { throw 'TEOX source model name does not match the selected part.' }
+        $meter=0.0
+        if (-not [double]::TryParse($unit.GetAttribute('meter'),[Globalization.NumberStyles]::Float,[Globalization.CultureInfo]::InvariantCulture,[ref]$meter) -or
+            $meter -le 0 -or [double]::IsInfinity($meter) -or [double]::IsNaN($meter)) { throw 'TEOX model units are invalid.' }
+        $mesh=$archive.GetEntry($geometry.GetAttribute('id')+'.stl')
+        if ($null -eq $mesh -or $mesh.Length -lt 134) { throw 'TEOX tube preview mesh is missing or empty.' }
+        $meshStream=$mesh.Open();$binary=New-Object IO.BinaryReader($meshStream)
+        try {
+            $header=$binary.ReadBytes(84)
+            if ($header.Length -ne 84) { throw 'TEOX STL header is incomplete.' }
+            $triangles=[BitConverter]::ToUInt32($header,80)
+            if ($triangles -eq 0 -or (84+[long]$triangles*50) -ne $mesh.Length) { throw 'Unsupported or incomplete binary STL mesh in TEOX.' }
+            $meshStream.CopyTo([IO.Stream]::Null)
+        } finally { $binary.Dispose();$meshStream.Dispose() }
+        if ((Get-FileHash -LiteralPath $file.FullName).Hash -cne $hash) { throw 'TEOX changed during inspection.' }
+        [pscustomobject]@{Path=$file.FullName;PartName=$ExpectedPartName;SourceModel=$sourceName;GeometryCount=1;
+            MeshTriangles=$triangles;UnitMeter=$meter;SHA256=$hash;Check='Container and model metadata verified; engineering geometry and processing require operator review.'}
+    } finally { $archive.Dispose() }
+}
+
+function Test-TeoxExport {
+    param($Request,[DateTime]$Now=[DateTime]::UtcNow)
+    $started=[DateTime]::Parse($Request.RequestedUtc).ToUniversalTime()
+    $changed=New-Object 'System.Collections.Generic.List[string]'
+    foreach ($path in $Request.CandidatePaths) {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+        $file=Get-Item -LiteralPath $path
+        if ($file.Length -eq 0 -or $file.LastWriteTimeUtc -lt $started.AddSeconds(-2) -or $file.LastWriteTimeUtc -gt $Now.AddSeconds(-1)) { continue }
+        $prior=@($Request.PriorOutputs | Where-Object { $_.Path -ieq $path })
+        if ($prior.Count -ne 1) { throw 'TEOX export receipt has an incomplete candidate snapshot.' }
+        if ($prior[0].Exists -and $file.Length -eq $prior[0].Length -and $file.LastWriteTimeUtc.Ticks -le $prior[0].WriteTicks -and (Get-FileHash -LiteralPath $path).Hash -ceq $prior[0].SHA256) { continue }
+        $changed.Add($path)
+    }
+    if ($changed.Count -eq 0) { return [pscustomobject]@{Status='Pending';Message='Waiting for a fresh TEOX beside the input model or in its model-named subfolder.'} }
+    if ($changed.Count -gt 1) { return [pscustomobject]@{Status='Failed';Message='More than one TEOX changed. Register the intended output explicitly.'} }
+    try {
+        $summary=Get-TeoxSummary $changed[0] $Request.PartName
+        [pscustomobject]@{Status='TeoxVerified';Message='Fresh TEOX container, source model, units and single-tube preview verified. Tube Design engineering/processing choices remain operator-reviewed.';Summary=$summary}
+    } catch { [pscustomobject]@{Status='Pending';Message='The new TEOX is not yet a complete supported export: '+$_.Exception.Message} }
+}
+
 function Get-TubeDesignShortcutCandidates {
     param([object[]]$Shortcuts)
     # A running sldworks.exe is not the Tube Design starter. Preserve the normal
@@ -477,4 +574,4 @@ Complete your usual TRUMPF simulation and operator release before production.
     return $completed
 }
 
-Export-ModuleMember -Function ConvertFrom-TrumpfCsv,Read-TrumpfTable,Get-TpcSummary,Test-AutoRunContext,Test-AutoRunCalculation,Read-TubxProperties,Test-JobName,Get-TubeDesignShortcutCandidates,Assert-TubeToolbarState,Get-TubeOutputDirectory,New-TubeJob,Save-TubeJob,Set-TubeJobName,Open-TubeJob,Test-TubePackage,Copy-CheckedPackage
+Export-ModuleMember -Function ConvertFrom-TrumpfCsv,Read-TrumpfTable,Get-TpcSummary,Test-AutoRunContext,Test-AutoRunCalculation,Read-TubxProperties,Test-JobName,Test-TubeDocumentTitle,New-TeoxExportRequest,Get-TeoxSummary,Test-TeoxExport,Get-TubeDesignShortcutCandidates,Assert-TubeToolbarState,Get-TubeOutputDirectory,New-TubeJob,Save-TubeJob,Set-TubeJobName,Open-TubeJob,Test-TubePackage,Copy-CheckedPackage

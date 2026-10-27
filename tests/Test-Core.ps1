@@ -121,6 +121,83 @@ try {
     Reject { Test-AutoRunContext $true @('TruLaser Tube 7000 (T12)') 1 1 } 'Auto Run handoff refuses an existing visible queue part' 'duplicate'
     $properties=Read-TubxProperties $ReferenceTubx
     Check (-not $properties.HasErrors -and $properties.Machine -ceq 'TruLaser Tube 7000 (T12)') 'Real uploaded TUBX properties are readable without processing errors'
+    Check (Test-TubeDocumentTitle 'Tube Design Premium 2026 SP1.1 - [Assembly Beam2.SLDPRT *]' 'Assembly Beam2') 'Tube Design document identity accepts the actual recorded title'
+    Check (-not (Test-TubeDocumentTitle 'Tube Design Premium 2026 SP1.1 - [Assembly Beam2.SLDPRT *]' 'Assembly Beam')) 'Document identity rejects a prefix-only part-name match'
+    Check (-not (Test-TubeDocumentTitle 'Tube Design Premium 2026 SP1.1' 'Assembly Beam2')) 'Document identity rejects the empty starter window'
+    Check (Test-TubeDocumentTitle 'Tube Design Premium 2026 SP1.1 - [Assembly Beam2]' 'Assembly Beam2') 'Document identity accepts the recorded saved-model title without extension'
+    $teox=Get-TeoxSummary $ReferenceTeox 'Assembly Beam2'
+    Check ($teox.GeometryCount -eq 1 -and $teox.MeshTriangles -gt 0 -and $teox.UnitMeter -eq 0.001) 'Real TEOX contains the expected source model, one geometry, valid units, and a complete binary preview'
+    Reject { Get-TeoxSummary $ReferenceTeox 'Wrong part' } 'TEOX belonging to another source model is rejected' 'source model'
+    $exportFolder=Join-Path $temp 'teox-export';$null=New-Item -ItemType Directory -Path $exportFolder
+    foreach ($extension in @('.stp','.step','.sldprt')) {
+        $cadPath=Join-Path $exportFolder ('Assembly Beam2'+$extension)
+        Copy-Item -LiteralPath $ReferenceCad -Destination $cadPath
+        $planned=New-TeoxExportRequest $cadPath
+        Check ($planned.CandidatePaths.Count -eq 2 -and [IO.Path]::GetExtension($planned.CandidatePaths[0]) -eq '.teox') ('TEOX output-path planning supports '+$extension+' (no CAD conversion is simulated)')
+    }
+    $unsupported=Join-Path $exportFolder 'part.txt';[IO.File]::WriteAllText($unsupported,'test')
+    Reject { New-TeoxExportRequest $unsupported } 'Unsupported CAD extension is rejected'
+    $cadPath=Join-Path $exportFolder 'Assembly Beam2.stp'
+    $flat=Join-Path $exportFolder 'Assembly Beam2.teox'
+    Copy-Item -LiteralPath $ReferenceTeox -Destination $flat
+    [IO.File]::SetLastWriteTimeUtc($flat,[DateTime]::UtcNow.AddSeconds(-1))
+    $exportRequest=New-TeoxExportRequest $cadPath
+    Check ((Test-TeoxExport $exportRequest ([DateTime]::UtcNow.AddSeconds(2))).Status -eq 'Pending') 'An unchanged cached TEOX does not count as a new export'
+    [IO.File]::SetLastWriteTimeUtc($flat,[DateTime]::UtcNow)
+    Check ((Test-TeoxExport $exportRequest ([DateTime]::UtcNow.AddSeconds(2))).Status -eq 'TeoxVerified') 'A fresh native export beside the CAD is detected'
+    $childDir=Join-Path $exportFolder 'Assembly Beam2';$null=New-Item -ItemType Directory -Path $childDir
+    $child=Join-Path $childDir 'Assembly Beam2.teox'
+    $childRequest=New-TeoxExportRequest $cadPath
+    Copy-Item -LiteralPath $ReferenceTeox -Destination $child
+    [IO.File]::SetLastWriteTimeUtc($child,[DateTime]::UtcNow)
+    Check ((Test-TeoxExport $childRequest ([DateTime]::UtcNow.AddSeconds(2))).Status -eq 'TeoxVerified') 'A fresh native export in the model-named subfolder is detected'
+    [IO.File]::SetLastWriteTimeUtc($flat,[DateTime]::UtcNow)
+    Check ((Test-TeoxExport $childRequest ([DateTime]::UtcNow.AddSeconds(2))).Status -eq 'Failed') 'Two changed candidate TEOXs require explicit selection'
+    Remove-Item -LiteralPath $child
+    [IO.File]::WriteAllText($flat,'incomplete')
+    [IO.File]::SetLastWriteTimeUtc($flat,[DateTime]::UtcNow)
+    Check ((Test-TeoxExport $exportRequest ([DateTime]::UtcNow.AddSeconds(2))).Status -eq 'Pending') 'An incomplete TEOX is not marked verified'
+    $referenceArchive=[IO.Compression.ZipFile]::OpenRead($ReferenceTeox)
+    try {
+        $reader=New-Object IO.StreamReader($referenceArchive.GetEntry('ColladaData.dae').Open())
+        try { $referenceXml=$reader.ReadToEnd() } finally { $reader.Dispose() }
+    } finally { $referenceArchive.Dispose() }
+    function Make-TestTeox([string]$name,[string]$xml,[switch]$ShortMesh) {
+        $path=Join-Path $temp $name
+        $sourceArchive=[IO.Compression.ZipFile]::OpenRead($ReferenceTeox)
+        $output=[IO.Compression.ZipFile]::Open($path,[IO.Compression.ZipArchiveMode]::Create)
+        try {
+            foreach ($entry in $sourceArchive.Entries) {
+                $target=$output.CreateEntry($entry.FullName);$targetStream=$target.Open()
+                try {
+                    if ($entry.FullName -eq 'ColladaData.dae') {
+                        $data=[Text.Encoding]::UTF8.GetBytes($xml);$targetStream.Write($data,0,$data.Length)
+                    } elseif ($ShortMesh -and $entry.FullName -eq 'body_1.stl') {
+                        $targetStream.WriteByte(0)
+                    } else {
+                        $source=$entry.Open();try { $source.CopyTo($targetStream) } finally { $source.Dispose() }
+                    }
+                } finally { $targetStream.Dispose() }
+            }
+        } finally { $sourceArchive.Dispose();$output.Dispose() }
+        return $path
+    }
+    $wrongSource=Make-TestTeox 'wrong-source.teox' ($referenceXml.Replace('Assembly Beam2.SLDPRT','Different.SLDPRT'))
+    Reject { Get-TeoxSummary $wrongSource 'Assembly Beam2' } 'TEOX source provenance mismatch is rejected' 'source model'
+    $xml=New-Object Xml.XmlDocument;$xml.LoadXml($referenceXml)
+    $geometry=$xml.SelectSingleNode('//*[local-name()="library_geometries"]/*[local-name()="geometry"]')
+    $null=$geometry.ParentNode.AppendChild($geometry.CloneNode($true))
+    $multiple=Make-TestTeox 'multiple.teox' $xml.OuterXml
+    Reject { Get-TeoxSummary $multiple 'Assembly Beam2' } 'Multi-geometry export is rejected by the single-part workflow' 'exactly one'
+    $withDtd=Make-TestTeox 'dtd.teox' ($referenceXml.Replace('<COLLADA ', '<!DOCTYPE COLLADA [<!ENTITY sample "text">]><COLLADA '))
+    Reject { Get-TeoxSummary $withDtd 'Assembly Beam2' } 'TEOX XML document type declarations are prohibited' 'DTD'
+    $badUnits=Make-TestTeox 'bad-units.teox' ($referenceXml.Replace('meter="0.001"','meter="0"'))
+    Reject { Get-TeoxSummary $badUnits 'Assembly Beam2' } 'Invalid TEOX unit scale is rejected' 'units'
+    $shortMesh=Make-TestTeox 'short-mesh.teox' $referenceXml -ShortMesh
+    Reject { Get-TeoxSummary $shortMesh 'Assembly Beam2' } 'Missing or incomplete STL preview is rejected' 'mesh'
+    $xml.LoadXml($referenceXml);$xml.SelectSingleNode('//*[local-name()="geometry"]/*[local-name()="brep"]').RemoveAll()
+    $empty=Make-TestTeox 'empty-geometry.teox' $xml.OuterXml
+    Reject { Get-TeoxSummary $empty 'Assembly Beam2' } 'Empty TEOX geometry is rejected' 'geometry is empty'
     $calcFolder=Join-Path $temp 'calculation';$null=New-Item -ItemType Directory -Path $calcFolder
     $inputTeox=Join-Path $calcFolder 'Assembly Beam2.teox'
     Copy-Item -LiteralPath $ReferenceTeox -Destination $inputTeox

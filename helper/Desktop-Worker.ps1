@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('Import','Identify','Capture','AutoRunImport')][string]$Action,
+    [ValidateSet('Import','Identify','Capture','AutoRunImport','TubeExport','ModelSave')][string]$Action,
     [string]$InputPath,
     [Parameter(Mandatory)][string]$ResultPath
 )
@@ -10,8 +10,10 @@ try {
     $outcome = switch ($Action) {
         'Import' { Invoke-TubeImport $InputPath }
         'Identify' { Invoke-TubeIdentify $InputPath }
-        'Capture' { Save-TubeControls ($ResultPath + '.controls.txt') }
+        'Capture' { Save-TubeControls ($ResultPath + '.controls.txt') -TubeDesignOnly }
         'AutoRunImport' { Invoke-AutoRunImport $InputPath }
+        'TubeExport' { Invoke-TubeExport $InputPath }
+        'ModelSave' { Invoke-TubeModelSave $InputPath }
     }
     $message=if ($outcome -is [string]) { $outcome } else { $outcome.Message }
     $data=if ($outcome -is [string]) { $null } else { $outcome.Request }

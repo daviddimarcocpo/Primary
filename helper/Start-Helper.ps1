@@ -19,8 +19,12 @@ $script:calculationPart = $null
 $script:calculationDeadline = $null
 $calculationTimer=New-Object Windows.Forms.Timer
 $calculationTimer.Interval=2000
+$script:teoxPart=$null
+$script:teoxDeadline=$null
+$teoxTimer=New-Object Windows.Forms.Timer
+$teoxTimer.Interval=2000
 $form = New-Object Windows.Forms.Form
-$form.Text = 'Tube Job Helper 0.2.0 - assisted workflow'
+$form.Text = 'Tube Design Helper 0.3.0 - CAD to TEOX'
 $form.ClientSize = New-Object Drawing.Size(1000,760)
 $form.StartPosition = 'CenterScreen'
 $form.MinimumSize = New-Object Drawing.Size(1016,799)
@@ -28,9 +32,9 @@ $tabs = New-Object Windows.Forms.TabControl
 $tabs.Dock = 'Fill'
 $form.Controls.Add($tabs)
 $setupPage = New-Object Windows.Forms.TabPage('1. Prepare job')
-$partsPage = New-Object Windows.Forms.TabPage('2. Design and program')
+$partsPage = New-Object Windows.Forms.TabPage('2. Tube Design to TEOX')
 $packagePage = New-Object Windows.Forms.TabPage('3. Nest and check outputs')
-$tabs.TabPages.AddRange(@($setupPage,$partsPage,$packagePage))
+$tabs.TabPages.AddRange(@($setupPage,$partsPage))
 
 function Add-Label($parent,$text,$x,$y,$width=920,$height=24) {
     $control = New-Object Windows.Forms.Label
@@ -78,7 +82,7 @@ function Write-SessionLog($message) {
     }
 }
 function Invoke-DesktopAction($action) {
-    if ($action -notin @('Import','Identify','Capture','AutoRunImport')) { throw 'Unsupported desktop action.' }
+    if ($action -notin @('Import','Identify','Capture','AutoRunImport','TubeExport','ModelSave')) { throw 'Unsupported desktop action.' }
     $part=Get-CurrentPart
     $inputPath=$part.WorkingCopy
     if ($action -eq 'AutoRunImport') {
@@ -86,6 +90,7 @@ function Invoke-DesktopAction($action) {
         if (-not $part.MaterialAndProfileReviewed -or -not $part.MarkingReviewed -or -not $part.TeoxPath) { throw 'Confirm the profile/marking and register the TEOX before importing into Auto Run.' }
         $inputPath=$part.TeoxPath
     }
+    if ($action -eq 'TubeExport' -and (-not $part.MaterialAndProfileReviewed -or -not $part.MarkingReviewed)) { throw 'Review and confirm the profile/material and processing choices before starting TEOX export.' }
     $resultPath=Join-Path (Join-Path $script:job.Directory 'diagnostics') ((Get-Date -Format 'yyyyMMdd-HHmmss')+'-'+[guid]::NewGuid().ToString('N').Substring(0,6)+'.json')
     $worker=Join-Path $PSScriptRoot 'Desktop-Worker.ps1'
     foreach ($value in @($worker,$inputPath,$resultPath)) {
@@ -118,11 +123,52 @@ function Invoke-DesktopAction($action) {
             $script:report=$null; $pdfReviewed.Checked=$false
             Save-TubeJob $script:job
             Start-CalculationWatch $part
+        } elseif ($action -eq 'TubeExport') {
+            $part | Add-Member -NotePropertyName TeoxExportRequest -NotePropertyValue $result.Data -Force
+            $part | Add-Member -NotePropertyName TeoxExportCheck -NotePropertyValue $null -Force
+            $script:job.State='Tube Design export requested';$script:job.PackageReport=$null
+            Save-TubeJob $script:job
+            Start-TeoxWatch $part
         }
     } finally {
         $workerProcess.Dispose(); $script:busy=$false; $form.Show(); $form.Activate()
     }
 }
+
+function Start-TeoxWatch($part) {
+    if (-not $part.PSObject.Properties['TeoxExportRequest'] -or $null -eq $part.TeoxExportRequest) { throw 'Use Begin TEOX export first so an old export cannot be mistaken for new output. You can register an existing TEOX separately.' }
+    $script:teoxPart=$part;$script:teoxDeadline=[DateTime]::UtcNow.AddSeconds(120)
+    $teoxTimer.Start();Update-TeoxWatch
+}
+
+function Update-TeoxWatch {
+    try {
+        $part=$script:teoxPart
+        if ($null -eq $part) { return }
+        if (-not $part.MaterialAndProfileReviewed -or -not $part.MarkingReviewed) { throw 'Profile or processing review was withdrawn; review again before exporting.' }
+        $request=$part.TeoxExportRequest
+        if ($request.PartName -ine $part.PartName -or [IO.Path]::GetFullPath($request.InputPath) -ine [IO.Path]::GetFullPath($part.WorkingCopy)) { throw 'The export receipt does not match the selected working copy.' }
+        $status=Test-TeoxExport $request
+        $partsStatus.Text=$part.PartName+': '+$status.Message
+        if ($status.Status -eq 'TeoxVerified') {
+            $teoxTimer.Stop();$part.TeoxPath=$status.Summary.Path
+            $part | Add-Member -NotePropertyName TeoxExportCheck -NotePropertyValue $status -Force
+            $part | Add-Member -NotePropertyName AutoRunRequest -NotePropertyValue $null -Force
+            $part | Add-Member -NotePropertyName AutoRunCalculation -NotePropertyValue $null -Force
+            $script:job.State='TEOX container verified; operator review retained';$script:job.PackageReport=$null
+            Save-TubeJob $script:job
+            $reportPath=Join-Path (Join-Path $script:job.Directory 'diagnostics') ('teox-check-'+[guid]::NewGuid().ToString('N')+'.json')
+            $status | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $reportPath -Encoding UTF8
+            $teoxLabel.Text='Verified TEOX: '+$part.TeoxPath
+            Write-SessionLog ('Fresh TEOX verified: '+$part.TeoxPath)
+        } elseif ($status.Status -eq 'Failed') {
+            $teoxTimer.Stop();Write-SessionLog ('TEOX check stopped: '+$status.Message)
+        } elseif ([DateTime]::UtcNow -ge $script:teoxDeadline) {
+            $teoxTimer.Stop();$partsStatus.Text='Still waiting for a fresh TEOX. Finish the save/export dialogs in Tube Design, then click Check TEOX export. For another output folder, use Register exported TEOX.'
+        }
+    } catch { $teoxTimer.Stop();$partsStatus.Text=$_.Exception.Message;Write-SessionLog ('TEOX watch stopped: '+$_.Exception.Message) }
+}
+$teoxTimer.Add_Tick({ Update-TeoxWatch })
 
 function Start-CalculationWatch($part) {
     if (-not $part.PSObject.Properties['AutoRunRequest'] -or $null -eq $part.AutoRunRequest) { throw 'No helper import request is recorded for this part. Open the + dialog and use Import TEOX first.' }
@@ -234,14 +280,16 @@ function Update-ExpectedFileLabels {
     }
 }
 
-$null=Add-Label $setupPage 'Local assistant for TRUMPF. No API license required. This version guides the workflow; it is not unattended programming.' 18 18 940 38
-$null=Add-Label $setupPage 'Job name (use this exact name when exporting the nested job)' 18 65
+$null=Add-Label $setupPage 'Tube Design focus: import CAD, confirm tube/processing choices, and export a verified TEOX. Auto Run and nesting are paused.' 18 18 940 38
+$null=Add-Label $setupPage 'Batch / helper job name' 18 65
 $jobName=Add-Text $setupPage 18 91 620
-$null=Add-Label $setupPage 'Stock length (inches)' 670 65 260
+$stockLabel=Add-Label $setupPage 'Stock length (inches)' 670 65 260
+$stockLabel.Visible=$false
 $stock=New-Object Windows.Forms.NumericUpDown
 $stock.Location=New-Object Drawing.Point(670,91); $stock.Width=180
 $stock.DecimalPlaces=3; $stock.Minimum=0.001; $stock.Maximum=10000; $stock.Value=240
 $setupPage.Controls.Add($stock)
+$stock.Visible=$false
 $null=Add-Label $setupPage 'Save jobs under' 18 132
 $parentPath=Add-Text $setupPage 18 158 760 (Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'Tube Laser Jobs')
 $null=Add-Button $setupPage 'Browse...' 790 154 150 {
@@ -255,6 +303,7 @@ $null=$grid.Columns.Add('PartName','Part name (from filename)')
 $null=$grid.Columns.Add('Quantity','Required quantity')
 $null=$grid.Columns.Add('SourcePath','Original CAD file')
 $grid.Columns['PartName'].ReadOnly=$true; $grid.Columns['SourcePath'].ReadOnly=$true
+$grid.Columns['Quantity'].Visible=$false
 $setupPage.Controls.Add($grid)
 $addFiles=Add-Button $setupPage 'Choose CAD files...' 18 199 200 {
     $dialog=New-Object Windows.Forms.OpenFileDialog
@@ -329,32 +378,34 @@ $null=Add-Button $partsPage 'Register exported TEOX...' 18 544 230 {
         if ((Get-Item -LiteralPath $path).LastWriteTimeUtc -lt ([DateTime]::Parse($script:job.CreatedUtc).ToUniversalTime().AddSeconds(-2))) { throw 'This TEOX predates this helper job. Export a fresh file.' }
         $archive=[IO.Compression.ZipFile]::OpenRead($path)
         try { if ($null -eq $archive.GetEntry('ColladaData.dae')) { throw 'This does not match the supported TEOX container format.' } } finally { $archive.Dispose() }
+        $summary=Get-TeoxSummary $path $part.PartName
         $part.TeoxPath=$path; Save-TubeJob $script:job
+        $part | Add-Member -NotePropertyName TeoxExportCheck -NotePropertyValue $summary -Force
+        $part | Add-Member -NotePropertyName TeoxExportRequest -NotePropertyValue $null -Force
+        if ($null -ne $script:teoxPart -and $script:teoxPart.PartName -ieq $part.PartName) { $teoxTimer.Stop() }
         $part | Add-Member -NotePropertyName AutoRunRequest -NotePropertyValue $null -Force
         $part | Add-Member -NotePropertyName AutoRunCalculation -NotePropertyValue $null -Force
         if ($null -ne $script:calculationPart -and $script:calculationPart.PartName -ieq $part.PartName) { $calculationTimer.Stop() }
         $script:report=$null; $pdfReviewed.Checked=$false
-        $script:job.PackageReport=$null; $script:job.State='TEOX registered; calculation pending'; Save-TubeJob $script:job
+        $script:job.PackageReport=$null; $script:job.State='TEOX container verified; operator review retained'; Save-TubeJob $script:job
         $teoxLabel.Text='Registered: '+$path
         $packageInstructions.Text=Get-PackageInstructions
     } catch { Show-Error $_.Exception.Message }
 }
-$null=Add-Button $partsPage 'Copy TEOX path' 263 544 180 {
+$null=Add-Button $partsPage 'Open input/output folder' 263 544 180 {
     try {
         $part=Get-CurrentPart
-        if (-not $part.TeoxPath) { throw 'Register the newly exported TEOX first.' }
-        [Windows.Forms.Clipboard]::SetText($part.TeoxPath)
-        $partsStatus.Text='TEOX path copied. In Auto Run, select the T12 machine, click +, and paste this path.'
+        Show-Folder (Get-TubeOutputDirectory $script:job $partList.SelectedIndex)
     } catch { Show-Error $_.Exception.Message }
 }
-$null=Add-Button $partsPage 'Open Auto Run' 458 544 170 { try { Launch-Application 'Auto Run' } catch { Show-Error $_.Exception.Message } }
+$null=Add-Button $partsPage 'Fill model save dialog' 458 544 170 { try { Invoke-DesktopAction ModelSave } catch { Show-Error $_.Exception.Message } }
 $null=Add-Button $partsPage 'Save control report' 643 544 200 { try { Invoke-DesktopAction Capture } catch { Show-Error $_.Exception.Message } }
-$null=Add-Button $partsPage 'Import TEOX in Auto Run' 18 586 230 { try { Invoke-DesktopAction AutoRunImport } catch { Show-Error $_.Exception.Message } }
-$null=Add-Button $partsPage 'Check calculation outputs' 263 586 230 { try { Start-CalculationWatch (Get-CurrentPart) } catch { Show-Error $_.Exception.Message } }
+$null=Add-Button $partsPage 'Begin TEOX export' 18 586 230 { try { Invoke-DesktopAction TubeExport } catch { Show-Error $_.Exception.Message } }
+$null=Add-Button $partsPage 'Check TEOX export' 263 586 230 { try { Start-TeoxWatch (Get-CurrentPart) } catch { Show-Error $_.Exception.Message } }
 $null=Add-Button $partsPage 'Stop watching' 508 586 150 {
-    $calculationTimer.Stop(); $partsStatus.Text='Stopped watching. Auto Run remains running and no files were removed.'
+    $calculationTimer.Stop();$teoxTimer.Stop(); $partsStatus.Text='Stopped watching. Tube Design remains running and no files were removed.'
 }
-$partsStatus=Add-Label $partsPage 'Open Auto Run, select T12 and click +. Then use Import TEOX in Auto Run. Desktop actions require local verification.' 18 638 925 70
+$partsStatus=Add-Label $partsPage 'Focus: CAD to TEOX. Import and export controls require local verification. Profile/marking and export selection are confirmed in Tube Design.' 18 638 925 70
 $partList.Add_SelectedIndexChanged({
     try {
         $part=Get-CurrentPart
@@ -367,8 +418,9 @@ Working copy: $($part.WorkingCopy)
 1. Open Tube Design. Use Import working copy, or import this path manually. Wait for the correct model to appear. Stop on any unexpected prompt.
 2. Use Identify profile or open that command manually. Select the intended body, confirm material/profile/dimensions/direction, and accept in Tube Design.
 3. Assign process parameters. Choose and confirm marking contours where required. Do not apply the BEAM2 example's selections to unrelated parts.
-4. Export production data. If asked to save SLDPRT, save beside this working copy with the same base name. Select the intended profile(s) and export TEOX with this part name into the working folder.
-5. Register the new TEOX below. In Auto Run, choose the Auto Run tab and TruLaser Tube 7000 (T12), then click + once. Leave its file chooser open and click Import TEOX in Auto Run here. The helper fills the path, requests Open, and watches fresh part outputs beside the input. Inspect the resulting green check and warnings before nesting.
+4. Click Begin TEOX export. If Tube Design asks to save first, accept its save prerequisite yourself; when the model-save dialog appears, click Fill model save dialog here. Inspect any overwrite prompt yourself.
+5. In Export production data, select the intended tube, review export settings, and accept the green check. Keep TRUMPF's normal save-beside-input behavior. The helper watches the working folder and its model-named child folder for a new TEOX and registers it after validation.
+6. If the export is saved elsewhere inside this job, use Register exported TEOX. No Auto Run import or TPC is needed for this stage.
 
 Repeat for each part. If one CAD file contains multiple separately produced profiles, stop: this release expects one part name/quantity per CAD file.
 "@ -replace '\r?\n',"`r`n"
@@ -385,6 +437,8 @@ foreach ($check in @($profileReviewed,$markingReviewed)) {
                 $part | Add-Member -NotePropertyName AutoRunRequest -NotePropertyValue $null -Force
                 $part | Add-Member -NotePropertyName AutoRunCalculation -NotePropertyValue $null -Force
                 if ($null -ne $script:calculationPart -and $script:calculationPart.PartName -ieq $part.PartName) { $calculationTimer.Stop() }
+                if ($null -ne $script:teoxPart -and $script:teoxPart.PartName -ieq $part.PartName) { $teoxTimer.Stop() }
+                $part | Add-Member -NotePropertyName TeoxExportCheck -NotePropertyValue $null -Force
             }
             $script:job.State='Part review'; $script:job.PackageReport=$null
             $script:report=$null; $pdfReviewed.Checked=$false
@@ -504,5 +558,5 @@ $null=Add-Button $packagePage 'Change helper job name...' 540 625 260 {
         $packageStatus.Text='Helper name updated. Select the matching final nested job TPC/PDF, review the PDF again, and rerun the checks.'
     } catch { Show-Error $_.Exception.Message }
 }
-$form.Add_FormClosing({ param($sender,$eventData) if ($script:busy) { $eventData.Cancel=$true } else { $calculationTimer.Stop() } })
-try { [void]$form.ShowDialog() } finally { $calculationTimer.Dispose(); $form.Dispose() }
+$form.Add_FormClosing({ param($sender,$eventData) if ($script:busy) { $eventData.Cancel=$true } else { $calculationTimer.Stop();$teoxTimer.Stop() } })
+try { [void]$form.ShowDialog() } finally { $calculationTimer.Dispose();$teoxTimer.Dispose(); $form.Dispose() }

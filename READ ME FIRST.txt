@@ -1,46 +1,38 @@
-TUBE JOB HELPER 0.2.0
+TUBE DESIGN HELPER 0.3.0 - CAD TO TEOX
 
-NEW TEST: AUTO RUN FILE IMPORT AND CALCULATION OUTPUT WATCH
+Auto Run is paused. This version focuses only on importing STP, STEP or SLDPRT
+into Tube Design and getting a TEOX back out. Existing jobs/files are retained.
 
-1. Download from your GitHub repository. Unblock the ZIP in Properties if shown,
-   extract into a new folder, and launch Start Helper.cmd.
-2. Resume saved job and choose the existing job.json. Keep your CAD/exports where
-   they are. Select Assembly Beam2, whose TEOX is already registered.
-3. Open Auto Run's Auto Run tab and select TruLaser Tube 7000 (T12). Use a queue
-   that does not already contain this test part. Existing saved nests/files do
-   not need to be removed. The helper will stop if it detects a duplicate row.
-4. Click + in Auto Run. Leave Select TEOX files for import open.
-5. Click Import TEOX in Auto Run in the helper. It verifies the context, enters
-   the registered path and requests Open, then watches fresh part TPC/TUBX/PDF
-   outputs beside that TEOX. Leave TRUMPF's default output location unchanged.
-6. Read the status. OutputsVerified means fresh matching output metadata, not
-   a machine-ready program. Inspect Auto Run's green check and warnings yourself.
+FIRST TEST
+1. Unblock the downloaded ZIP if needed and extract into a new folder.
+2. Launch Start Helper.cmd. Resume existing job.json, or choose CAD and prepare
+   a new batch. Original CAD is retained separately; work on the staged copy.
+3. Open Tube Design normally. Save work and close the current part before
+   testing Import working copy. Inspect whether the correct model actually loads.
+4. Identify profile and accept the body/material/profile in Tube Design. Apply
+   marking/cutting choices. Check the two review acknowledgements in the helper.
+5. Click Begin TEOX export. If Tube Design asks to save first, accept that
+   prerequisite yourself. In its model-save dialog, click Fill model save dialog
+   in the helper. Any overwrite prompt still needs your decision.
+6. Review the Export production data selection/settings and click its green
+   check in Tube Design. Keep the normal output location beside the input/model.
+7. The helper watches the working folder and model-named child folder, checks
+   a fresh TEOX, and registers it. Use Check TEOX export after a timeout or
+   Register exported TEOX if you used another folder inside this batch.
 
-The new handoff is not yet verified on your Windows workstation. If it stops,
-leave the Auto Run dialog open and use Save control report. Reports now include
-more detail and deeper controls; review them before sharing.
+This is assisted automation. The new import, model-save and export controls
+still need their first local Windows test. No CAD-kernel conversion runs in the
+cloud, and no profile/marking selections are guessed. A request to import/save
+is not a confirmation that Tube Design accepted it.
 
-Check calculation outputs resumes watching a recorded request. Stop watching
-and a two-minute timeout stop only the helper's watch, not TRUMPF. If TRUMPF
-asks a question or shows an error, inspect it yourself; the helper does not
-answer unexpected dialogs or select cutting/marking technology for you.
+TEOX checks cover container structure, source model name, units, one geometry,
+and a complete binary STL preview. They do not establish engineering geometry
+or downstream machine readiness. Old cached output is not treated as a new
+export. No TEOX is modified or manufactured by the helper.
 
-Profile/material confirmation and marking remain your steps. Nesting and final
-export remain as before. After calculation, use the existing Nest and check
-outputs tab. Use the same helper job name as the intended named nest. Keep the
-PDF/TPC beside the TEOX; there is no generated-folder requirement. Review the
-PDF and run Check and collect package. A checked copy is placed in deliverables.
-Complete your usual TRUMPF simulation and operator release before production.
+If something stops, leave that Tube Design dialog open and use Save control
+report. It now captures Tube Design only. Review reports before sharing.
+No API password or remote access is needed. No USB transfer or machine command
+is performed. Do not change Windows security policy to make scripts run.
 
-Existing features retained:
-- Original CAD is retained; work on the staged working copy.
-- Open Tube Design uses its installed shortcut, never direct sldworks startup.
-- Import/Identify have native-toolbar fallback and privilege checks.
-- Change helper job name corrects helper metadata without moving/renaming files.
-- Resume saved job retains parts, TEOX paths, and metadata.
-- No passwords, API authorization, Python install, or network connection needed.
-- No automatic USB transfer or machine operation.
-
-If Windows blocks execution after unblocking this exact ZIP, share the message.
-Do not disable system policy. Launch uses RemoteSigned for its own process.
-See README.md and VALIDATION.md for full behavior and validation limits.
+See README.md and VALIDATION.md for details. No Python install is required.
