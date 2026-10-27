@@ -1,4 +1,4 @@
-TUBE JOB HELPER 0.1.1
+TUBE JOB HELPER 0.1.2
 
 1. On the downloaded ZIP, use Properties > Unblock if shown. Extract the entire
    ZIP into a new folder. This unblocks only this package, not system policy.
@@ -50,3 +50,13 @@ PowerShell process. Managed policy or unsigned-download restrictions may block
 it; report that message rather than changing your system policy.
 
 See README.md and VALIDATION.md for details, known limits, and development tests.
+
+UPDATE 0.1.2: Import and Identify can now query the native toolbar when Windows
+exposes no accessible button controls. Missing, hidden, disabled or ambiguous
+commands still stop without dispatch. Reports include Windows privilege levels
+and native command state. The helper does not elevate itself automatically.
+
+For the next test, keep the manually imported sample visible in a normally
+started Tube Design. Open the updated helper, Resume saved job, and choose its
+job.json. Select Assembly Beam2 and try Identify profile. If it opens, confirm
+the profile manually as usual. If it stops, save and share a new control report.

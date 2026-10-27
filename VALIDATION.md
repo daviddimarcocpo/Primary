@@ -1,4 +1,4 @@
-# Version 0.1.1 validation
+# Version 0.1.2 validation
 
 ## Reference evidence
 
@@ -15,7 +15,7 @@ User-supplied STEP, recorded two-minute manual workflow, final TPC, and Producti
 
 Core and syntax tests run using official PowerShell 7.4.6 for Linux. Its download was checked against the release's official SHA-256 manifest. This tests the PowerShell core against the actual supplied files, but is not a Windows PowerShell 5.1 runtime test. The helper uses PowerShell 5.1-compatible syntax and Windows built-in assemblies.
 
-**37 checks passed**, including four starter-shortcut routing regressions. The test transcript is included as `TEST RESULTS.txt` in the helper ZIP. Release file checksums are included as `SHA256SUMS.txt`. No test result should be interpreted as a live desktop or machine test.
+**45 checks passed**, including starter-shortcut routing regressions, compilation of the native Win32 adapter, and tests that reject missing/hidden/disabled commands or a wrong process/toolbar identity. The test transcript is included as `TEST RESULTS.txt` in the helper ZIP. Release file checksums are included as `SHA256SUMS.txt`. No test result should be interpreted as a live desktop or machine test.
 
 ## Local acceptance still required
 
@@ -31,3 +31,9 @@ Auto Run control automation beyond guided steps is not implemented in this relea
 ## Startup correction
 
 The initial helper preferred sldworks.exe over the TRUMPF starter. A local test subsequently reported "Starter application not run correctly", including for manual import. Version 0.1.1 removes this direct launch and shell-opens the installed normal Tube Design shortcut, retaining startup arguments and working directory. Automated tests verify starter selection, rejection of direct sldworks shortcuts, retention of route settings, and deduplication. Windows startup and successful CAD import remain pending local confirmation.
+
+## Toolbar lookup correction
+
+The new user-supplied report shows both expected toolbar names and native control IDs, but zero button children. This supports a missing-accessibility-children diagnosis, not a conclusion that command IDs changed. Version 0.1.2 queries TB_COMMANDTOINDEX and TB_GETSTATE on a uniquely matched visible native toolbar before using the existing WM_COMMAND route. Those scalar queries use no remote process memory. Tests compile the C# adapter without invoking its Windows entry points and exercise rejection conditions for the state validator. The actual native query and resulting Import/Identify operations remain unverified on Windows.
+
+Privilege mismatch detection and enhanced control-report output are also implemented but require local Windows verification.

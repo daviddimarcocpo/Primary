@@ -5,6 +5,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 try {
+    Import-Module (Join-Path $PSScriptRoot 'TubeJob.Core.psm1') -Force
     Import-Module (Join-Path $PSScriptRoot 'TubeJob.Desktop.psm1') -Force
     $message = switch ($Action) {
         'Import' { Invoke-TubeImport $InputPath }

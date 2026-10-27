@@ -1,5 +1,6 @@
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'TubeJob.Core.psm1') -Force
 
 function Initialize-TubeDesktop {
     Add-Type -AssemblyName UIAutomationClient
@@ -8,6 +9,8 @@ function Initialize-TubeDesktop {
         Add-Type @'
 using System;
 using System.Text;
+using System.Collections.Generic;
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 public static class TubeJobNative {
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
@@ -17,6 +20,66 @@ public static class TubeJobNative {
     [DllImport("user32.dll")] public static extern int GetDlgCtrlID(IntPtr h);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr h, StringBuilder s, int n);
     [DllImport("user32.dll", SetLastError=true)] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] static extern bool IsWindowEnabled(IntPtr h);
+    delegate bool EnumWindowProc(IntPtr h, IntPtr p);
+    [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr h, EnumWindowProc callback, IntPtr p);
+    [DllImport("user32.dll", SetLastError=true)] static extern IntPtr SendMessageTimeout(IntPtr h, uint m, UIntPtr w, IntPtr l, uint flags, uint timeout, out UIntPtr result);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+    [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+    [DllImport("advapi32.dll", SetLastError=true)] static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+    [DllImport("advapi32.dll", SetLastError=true)] static extern bool GetTokenInformation(IntPtr token, int type, out int value, int length, out int returned);
+    public static string Elevation(int pid) {
+        IntPtr process = OpenProcess(0x1000, false, (uint)pid);
+        if (process == IntPtr.Zero) return "Unknown (" + Marshal.GetLastWin32Error() + ")";
+        IntPtr token = IntPtr.Zero;
+        try {
+            if (!OpenProcessToken(process, 8, out token)) return "Unknown (" + Marshal.GetLastWin32Error() + ")";
+            int value, length;
+            if (!GetTokenInformation(token, 20, out value, 4, out length)) return "Unknown (" + Marshal.GetLastWin32Error() + ")";
+            return value != 0 ? "Elevated" : "Standard";
+        } finally { if (token != IntPtr.Zero) CloseHandle(token); CloseHandle(process); }
+    }
+    public sealed class ToolbarState {
+        public IntPtr Handle;
+        public int ProcessId;
+        public int ToolbarId;
+        public string ClassName;
+        public bool Visible;
+        public bool Enabled;
+        public long CommandIndex;
+        public long ButtonState;
+    }
+    static long Query(IntPtr h, uint message, int command) {
+        UIntPtr result;
+        if (SendMessageTimeout(h, message, (UIntPtr)(uint)command, IntPtr.Zero, 0x22, 500, out result) == IntPtr.Zero)
+            throw new InvalidOperationException("Native toolbar query was blocked or timed out (Windows error " + Marshal.GetLastWin32Error() + ").");
+        return IntPtr.Size == 4 ? unchecked((int)result.ToUInt32()) : unchecked((long)result.ToUInt64());
+    }
+    public static ToolbarState[] InspectToolbar(IntPtr root, int expectedPid, int toolbarId, int command) {
+        uint rootPid;
+        GetWindowThreadProcessId(root, out rootPid);
+        if (rootPid != expectedPid || !IsWindowEnabled(root)) throw new InvalidOperationException("Tube Design window changed or has a blocking dialog.");
+        var handles = new List<IntPtr>();
+        EnumWindowProc callback = delegate(IntPtr h, IntPtr unused) {
+            uint pid;
+            GetWindowThreadProcessId(h, out pid);
+            var name = new StringBuilder(256);
+            GetClassName(h, name, name.Capacity);
+            if (pid == expectedPid && GetDlgCtrlID(h) == toolbarId && name.ToString() == "ToolbarWindow32" && IsWindowVisible(h)) handles.Add(h);
+            return true;
+        };
+        EnumChildWindows(root, callback, IntPtr.Zero);
+        GC.KeepAlive(callback);
+        var results = new List<ToolbarState>();
+        // Do not query, or act on, an ambiguous set of windows.
+        if (handles.Count != 1) return results.ToArray();
+        var handle = handles[0];
+        results.Add(new ToolbarState { Handle=handle, ProcessId=expectedPid, ToolbarId=toolbarId,
+            ClassName="ToolbarWindow32", Visible=IsWindowVisible(handle), Enabled=IsWindowEnabled(handle),
+            CommandIndex=Query(handle, 0x419, command), ButtonState=Query(handle, 0x412, command) });
+        return results.ToArray();
+    }
 }
 '@
     }
@@ -28,6 +91,15 @@ function Get-TubeDesignWindow {
     })
     if ($matches.Count -ne 1) { throw 'Open exactly one visible Tube Design window, then try again. No application was launched or closed.' }
     return $matches[0]
+}
+
+function Assert-TubeAccess {
+    param($Process)
+    $workerLevel=[TubeJobNative]::Elevation([Diagnostics.Process]::GetCurrentProcess().Id)
+    $tubeLevel=[TubeJobNative]::Elevation($Process.Id)
+    if ($workerLevel -eq 'Standard' -and $tubeLevel -eq 'Elevated') {
+        throw 'Tube Design is running as administrator but the helper is not. Windows can block desktop controls across those levels. Keep both at the same level; if your normal TRUMPF shortcut requires administrator access, close the helper and use Run as administrator on Start Helper.cmd. No privilege change was made automatically.'
+    }
 }
 
 function Set-VerifiedTubeForeground {
@@ -81,7 +153,14 @@ function Invoke-TubeToolbar {
             if ($button.Current.IsEnabled -and -not $button.Current.IsOffscreen) { $buttons.Add($button) }
         }
     }
-    if ($buttons.Count -ne 1) { throw "The recorded $Command toolbar control is unavailable. Use the command manually; no substitute button was clicked." }
+    if ($buttons.Count -ne 1) {
+        # Current reports expose ToolbarWindow32 as a Pane with no UIA children.
+        # Query scalar toolbar state; no remote memory, coordinate guesses, or API license calls.
+        $toolbarId=if ($Command -eq 'Import') { 59424 } else { 59430 }
+        $nativeStates=@([TubeJobNative]::InspectToolbar($Process.MainWindowHandle,$Process.Id,$toolbarId,$commandId))
+        if ($nativeStates.Count -ne 1) { throw "The $Command toolbar is missing, hidden, or ambiguous in both accessibility and native inspection. No command was sent." }
+        Assert-TubeToolbarState $nativeStates[0] $Process.Id $toolbarId
+    }
     Set-VerifiedTubeForeground $Process.MainWindowHandle $Process.Id
     # Standard WM_COMMAND dispatch, only after finding the exact enabled toolbar ID
     # observed in the user's archived UI tree and recording. No coordinates/SendKeys.
@@ -96,6 +175,7 @@ function Invoke-TubeImport {
     $file = Get-Item -LiteralPath $InputPath
     if ($file.Extension -notmatch '^(?i:\.stp|\.step|\.sldprt)$') { throw 'Unsupported CAD file.' }
     $process = Get-TubeDesignWindow
+    Assert-TubeAccess $process
     $dialog = Get-ImportDialog $process
     if ($null -eq $dialog) {
         Invoke-TubeToolbar $process Import
@@ -143,6 +223,7 @@ function Invoke-TubeIdentify {
     param([string]$InputPath)
     Initialize-TubeDesktop
     $process = Get-TubeDesignWindow
+    Assert-TubeAccess $process
     $baseName = [IO.Path]::GetFileNameWithoutExtension($InputPath)
     if ($process.MainWindowTitle.IndexOf($baseName,[StringComparison]::OrdinalIgnoreCase) -lt 0) {
         throw 'The active document title does not match this part. Select the correct working copy manually.'
@@ -155,6 +236,7 @@ function Save-TubeControls {
     param([string]$OutputPath)
     Initialize-TubeDesktop
     $lines = New-Object 'System.Collections.Generic.List[string]'
+    $lines.Add('Helper privilege: '+[TubeJobNative]::Elevation([Diagnostics.Process]::GetCurrentProcess().Id))
     $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
     function Read-Controls($element, [int]$depth) {
         if ($depth -gt 6 -or $lines.Count -ge 1000) { return }
@@ -176,9 +258,21 @@ function Save-TubeControls {
     })) {
         if ($process.MainWindowHandle -eq 0) { continue }
         $lines.Add('APPLICATION: ' + $process.ProcessName + ' | ' + $process.MainWindowTitle)
+        $lines.Add('Application privilege: '+[TubeJobNative]::Elevation($process.Id))
         Read-Controls ([System.Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)) 0
+        if ($process.ProcessName -eq 'sldworks') {
+            foreach ($mapping in @(@{Name='Import';Toolbar=59424;Command=41699},@{Name='Identify';Toolbar=59430;Command=41706})) {
+                try {
+                    $states=@([TubeJobNative]::InspectToolbar($process.MainWindowHandle,$process.Id,$mapping.Toolbar,$mapping.Command))
+                    if ($states.Count -eq 1) {
+                        $lines.Add(('NATIVE {0}: toolbar={1}; command={2}; index={3}; state={4}; visible={5}; enabled={6}' -f
+                            $mapping.Name,$mapping.Toolbar,$mapping.Command,$states[0].CommandIndex,$states[0].ButtonState,$states[0].Visible,$states[0].Enabled))
+                    } else { $lines.Add('NATIVE '+$mapping.Name+': no unique visible toolbar') }
+                } catch { $lines.Add('NATIVE '+$mapping.Name+': '+$_.Exception.Message) }
+            }
+        }
     }
-    if ($lines.Count -eq 0) { throw 'No visible Tube Design or Auto Run window was found.' }
+    if ($lines.Count -eq 1) { throw 'No visible Tube Design or Auto Run window was found.' }
     $lines | Set-Content -LiteralPath $OutputPath -Encoding UTF8
     return 'Saved application control names only. No desktop screenshots or unrelated windows were captured.'
 }

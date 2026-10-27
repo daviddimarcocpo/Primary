@@ -2,7 +2,7 @@
 
 A local Windows assistant for preparing TRUMPF tube-laser jobs and collecting the **Production Package PDF and nested TPC**. Built around the supplied Tube Design 17 / Programming Tube Auto Run 7.0.1 demonstration for TruLaser Tube 7000 (T12).
 
-**Version 0.1.1 is an assisted workflow, not unattended CAD-to-machine programming.** It does not require a TRUMPF API license. Its Import and Identify commands use ordinary visible Tube Design controls and still require a first test on the programming workstation. Auto Run, nesting, contour selection, and export remain guided operator actions in this release. No simulation, machine operation, network transfer, or USB copy is performed.
+**Version 0.1.2 is an assisted workflow, not unattended CAD-to-machine programming.** It does not require a TRUMPF API license. Its Import and Identify commands use ordinary visible Tube Design controls and still require a first test on the programming workstation. Auto Run, nesting, contour selection, and export remain guided operator actions in this release. No simulation, machine operation, network transfer, or USB copy is performed.
 
 ## First run
 
@@ -15,6 +15,14 @@ A local Windows assistant for preparing TRUMPF tube-laser jobs and collecting th
 **Startup correction in 0.1.1:** Open Tube Design now launches its installed TRUMPF Windows shortcut, retaining its arguments and working directory. It does not launch `sldworks.exe` directly. If more than one shortcut exists or none can be selected automatically, choose the normal Tube Design `.lnk` shortcut. If none is available, open Tube Design normally from the Start menu. Close the incorrectly started instance normally, saving any work, before retrying. This addresses a likely cause of the reported "Starter application not run correctly" error; a local retry is still required.
 
 The first desktop test is **Import working copy** with Tube Design open at its normal screen. It should open the recorded Import dialog, enter the staged path, and request import. Inspect the displayed part before continuing. If the control is unavailable, the helper stops with an explanation; use the import command manually. It never tries substitute toolbar IDs, coordinates, or global keystrokes.
+
+## Toolbar update in 0.1.2
+
+The October 27 workstation report exposes Standard (59424) and Tubes (59430) as native ToolbarWindow32 panes with no accessibility button children. The helper now falls back to native toolbar state queries: it finds a unique visible toolbar in the target process, checks that the recorded command is present and enabled/not hidden, then dispatches it through the existing window command route. No screen-coordinate clicks, unverified command guesses, remote memory access, or licensed API calls are used.
+
+The update also compares the worker and Tube Design elevation. If Tube Design is elevated but the helper is standard, it explains the mismatch and stops. It does not elevate itself. Control reports now include those privilege states and native Import/Identify query results. Prefer both applications at their normal matching level; if the normal TRUMPF shortcut requires administrator access, start the trusted helper at that same level using Windows' Run as administrator action.
+
+This addresses the observed missing-button lookup; live command behavior still needs testing on the workstation. If either command stops, Save control report provides the native command state as well as the accessibility tree.
 
 ## The three tabs
 

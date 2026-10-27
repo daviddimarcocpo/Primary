@@ -180,6 +180,17 @@ function Get-TubeDesignShortcutCandidates {
     }
 }
 
+function Assert-TubeToolbarState {
+    param($State,[int]$ExpectedProcessId,[int]$ExpectedToolbarId)
+    if ($State.ProcessId -ne $ExpectedProcessId -or $State.ToolbarId -ne $ExpectedToolbarId -or
+        $State.ClassName -cne 'ToolbarWindow32' -or -not $State.Visible -or -not $State.Enabled) {
+        throw 'Native toolbar identity or visibility does not match the intended Tube Design window.'
+    }
+    if ($State.CommandIndex -lt 0 -or $State.ButtonState -lt 0 -or ($State.ButtonState -band 4) -eq 0 -or ($State.ButtonState -band 8) -ne 0) {
+        throw 'The native toolbar does not contain an enabled, visible instance of the recorded command. No command was sent.'
+    }
+}
+
 function New-TubeJob {
     param([string]$Name, [string]$ParentDirectory, [object[]]$Parts, [decimal]$StockLengthInches)
     $null = Test-JobName $Name
@@ -335,4 +346,4 @@ Complete your usual TRUMPF simulation and operator release before production.
     return $completed
 }
 
-Export-ModuleMember -Function ConvertFrom-TrumpfCsv,Read-TrumpfTable,Get-TpcSummary,Test-JobName,Get-TubeDesignShortcutCandidates,New-TubeJob,Save-TubeJob,Open-TubeJob,Test-TubePackage,Copy-CheckedPackage
+Export-ModuleMember -Function ConvertFrom-TrumpfCsv,Read-TrumpfTable,Get-TpcSummary,Test-JobName,Get-TubeDesignShortcutCandidates,Assert-TubeToolbarState,New-TubeJob,Save-TubeJob,Open-TubeJob,Test-TubePackage,Copy-CheckedPackage

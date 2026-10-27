@@ -8,7 +8,7 @@ from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 import re
 
-version = "0.1.1"
+version = "0.1.2"
 
 root = Path(__file__).resolve().parents[1]
 out = root / "artifacts"
@@ -37,7 +37,7 @@ payload["SHA256SUMS.txt"] = manifest.encode("utf-8")
 destination = out / f"Tube-Job-Helper-{version}.zip"
 with ZipFile(destination, "w") as archive:
     for name, data in sorted(payload.items()):
-        info = ZipInfo("Tube Job Helper/" + name, date_time=(2026, 10, 26, 0, 0, 0))
+        info = ZipInfo("Tube Job Helper/" + name, date_time=(2026, 10, 27, 0, 0, 0))
         info.compress_type = ZIP_DEFLATED
         info.external_attr = 0o100644 << 16
         archive.writestr(info, data)

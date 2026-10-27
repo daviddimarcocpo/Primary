@@ -41,6 +41,25 @@ try {
     Check (@(Get-TubeDesignShortcutCandidates @($wrong)).Count -eq 0) 'No direct sldworks fallback when a starter shortcut is missing'
     $duplicateRoute=[pscustomobject]@{Name=$normal.Name;Path='C:\Desktop\Tube Design 17.lnk';TargetPath=$normal.TargetPath;Arguments=$normal.Arguments;WorkingDirectory=$normal.WorkingDirectory}
     Check (@(Get-TubeDesignShortcutCandidates @($normal,$duplicateRoute)).Count -eq 1) 'Equivalent installed starter shortcuts are deduplicated'
+    $desktopSource=Get-Content -LiteralPath (Join-Path $repo 'helper/TubeJob.Desktop.psm1') -Raw
+    $nativeSource=[regex]::Match($desktopSource,"(?s)Add-Type @'\r?\n(.*?)\r?\n'@").Groups[1].Value
+    Add-Type -TypeDefinition $nativeSource
+    Check ($null -ne ('TubeJobNative' -as [type])) 'Native Win32 adapter compiles (Windows functions not invoked here)'
+    $nativeState=New-Object TubeJobNative+ToolbarState
+    $nativeState.ProcessId=123; $nativeState.ToolbarId=59424; $nativeState.ClassName='ToolbarWindow32'
+    $nativeState.Visible=$true; $nativeState.Enabled=$true; $nativeState.CommandIndex=2; $nativeState.ButtonState=4
+    Assert-TubeToolbarState $nativeState 123 59424
+    Check $true 'Native fallback accepts a verified visible and enabled command'
+    Reject { Assert-TubeToolbarState $nativeState 999 59424 } 'Native fallback rejects a different process' 'identity'
+    Reject { Assert-TubeToolbarState $nativeState 123 59430 } 'Native fallback rejects a different toolbar' 'identity'
+    $nativeState.ClassName='OtherWindow'
+    Reject { Assert-TubeToolbarState $nativeState 123 59424 } 'Native fallback rejects a different window class' 'identity'
+    $nativeState.ClassName='ToolbarWindow32'; $nativeState.CommandIndex=-1
+    Reject { Assert-TubeToolbarState $nativeState 123 59424 } 'Native fallback rejects an absent command' 'enabled, visible'
+    $nativeState.CommandIndex=2; $nativeState.ButtonState=12
+    Reject { Assert-TubeToolbarState $nativeState 123 59424 } 'Native fallback rejects a hidden command' 'enabled, visible'
+    $nativeState.ButtonState=0
+    Reject { Assert-TubeToolbarState $nativeState 123 59424 } 'Native fallback rejects a disabled command' 'enabled, visible'
     $summary=Get-TpcSummary $ReferenceTpc
     Check ($summary.Parts.Count -eq 1 -and $summary.Parts[0].Quantity -eq 10) 'Actual uploaded TPC contains one part type and quantity 10'
     Check ($summary.Parts[0].JobName -ceq 'CODEX TEST 10262026 SQ6X25') 'Actual TPC job identity'
