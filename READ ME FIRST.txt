@@ -1,4 +1,4 @@
-TUBE JOB HELPER 0.1.2
+TUBE JOB HELPER 0.1.3
 
 1. On the downloaded ZIP, use Properties > Unblock if shown. Extract the entire
    ZIP into a new folder. This unblocks only this package, not system policy.
@@ -35,8 +35,7 @@ operator release process before production. It never sends a job to the laser.
 
 Results: Documents\Tube Laser Jobs\[your unique job folder]
   originals      Retained input copies
-  work           CAD working copies and per-part exports
-  generated      Export your final named PDF/TPC here
+  work           CAD working copies and TRUMPF outputs beside each input
   deliverables   Collected checked pairs, checks.json, and REVIEW.txt
   diagnostics    Reports for troubleshooting local desktop actions
 
@@ -60,3 +59,8 @@ For the next test, keep the manually imported sample visible in a normally
 started Tube Design. Open the updated helper, Resume saved job, and choose its
 job.json. Select Assembly Beam2 and try Identify profile. If it opens, confirm
 the profile manually as usual. If it stops, save and share a new control report.
+
+UPDATE 0.1.3: Keep all TRUMPF default output locations beside the input files.
+The helper's final TPC/PDF pickers start in the TEOX folder. Select those native
+outputs directly; no move into a generated folder is needed. Existing jobs
+can be resumed unchanged. The checked deliverables are additional copies.

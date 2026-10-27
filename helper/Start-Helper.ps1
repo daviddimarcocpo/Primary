@@ -16,7 +16,7 @@ $script:busy = $false
 $script:reviewedPdfHash = $null
 $script:tubeDesignShortcut = $null
 $form = New-Object Windows.Forms.Form
-$form.Text = 'Tube Job Helper 0.1.2 - assisted workflow'
+$form.Text = 'Tube Job Helper 0.1.3 - assisted workflow'
 $form.ClientSize = New-Object Drawing.Size(1000,760)
 $form.StartPosition = 'CenterScreen'
 $form.MinimumSize = New-Object Drawing.Size(1016,799)
@@ -270,6 +270,7 @@ $null=Add-Button $partsPage 'Register exported TEOX...' 18 544 230 {
         try { if ($null -eq $archive.GetEntry('ColladaData.dae')) { throw 'This does not match the supported TEOX container format.' } } finally { $archive.Dispose() }
         $part.TeoxPath=$path; Save-TubeJob $script:job
         $teoxLabel.Text='Registered: '+$path
+        $packageInstructions.Text=Get-PackageInstructions
     } catch { Show-Error $_.Exception.Message }
 }
 $null=Add-Button $partsPage 'Copy TEOX path' 263 544 180 {
@@ -300,6 +301,7 @@ Working copy: $($part.WorkingCopy)
 
 Repeat for each part. If one CAD file contains multiple separately produced profiles, stop: this release expects one part name/quantity per CAD file.
 "@ -replace '\r?\n',"`r`n"
+        $packageInstructions.Text=Get-PackageInstructions
     } catch { Show-Error $_.Exception.Message }
 })
 foreach ($check in @($profileReviewed,$markingReviewed)) {
@@ -330,8 +332,9 @@ $partLines
 
 Keep the Amount/job multiplier at 1 for these per-part quantities. Group compatible material/profile parts appropriately; do not combine incompatible stock.
 Review stock and nesting settings, recalculate after editing quantities, and inspect the completed nest and warnings.
-Export the named nested job TPC and Production Package PDF into:
-$(Join-Path $script:job.Directory 'generated')
+Keep TRUMPF's normal output location beside its input TEOX; there is no need to redirect the export or move its files.
+Starting folder for the selected part:
+$(Get-TubeOutputDirectory $script:job $partList.SelectedIndex)
 
 The helper does not drive Auto Run/nesting controls yet. Perform these steps as in your recording, then select the two new files below. Check the PDF's job name, machine, parts, quantities, stock lengths, and tube layout yourself. Do not substitute an individual part report or timestamp-named intermediate TPC.
 "@
@@ -344,7 +347,7 @@ $tpcPath=Add-Text $packagePage 18 340 720
 $null=Add-Button $packagePage 'Select final TPC...' 755 334 190 {
     try {
         if ($null -eq $script:job) { throw 'Create a job first.' }
-        $path=Select-File 'Select the final named nested job TPC' 'TPC|*.tpc' (Join-Path $script:job.Directory 'generated')
+        $path=Select-File 'Select the final named nested job TPC' 'TPC|*.tpc' (Get-TubeOutputDirectory $script:job $partList.SelectedIndex $tpcPath.Text)
         if ($path) { $tpcPath.Text=$path; $script:report=$null }
     } catch { Show-Error $_.Exception.Message }
 }
@@ -352,7 +355,7 @@ $pdfPath=Add-Text $packagePage 18 390 720
 $null=Add-Button $packagePage 'Select job PDF...' 755 384 190 {
     try {
         if ($null -eq $script:job) { throw 'Create a job first.' }
-        $path=Select-File 'Select the matching Production Package PDF' 'PDF|*.pdf' (Join-Path $script:job.Directory 'generated')
+        $path=Select-File 'Select the matching Production Package PDF' 'PDF|*.pdf' (Get-TubeOutputDirectory $script:job $partList.SelectedIndex $tpcPath.Text)
         if ($path) { $pdfPath.Text=$path; $script:report=$null }
     } catch { Show-Error $_.Exception.Message }
 }
@@ -400,8 +403,8 @@ $null=Add-Button $packagePage 'Check and collect package' 18 625 260 {
         Show-Folder $destination
     } catch { $script:report=$null; $packageStatus.Text='Checks did not complete. '+$_.Exception.Message; Show-Error $_.Exception.Message }
 }
-$null=Add-Button $packagePage 'Open generated folder' 295 625 230 {
-    try { if ($null -eq $script:job) { throw 'Create a job first.' }; Show-Folder (Join-Path $script:job.Directory 'generated') } catch { Show-Error $_.Exception.Message }
+$null=Add-Button $packagePage 'Open output folder' 295 625 230 {
+    try { Show-Folder (Get-TubeOutputDirectory $script:job $partList.SelectedIndex $tpcPath.Text) } catch { Show-Error $_.Exception.Message }
 }
 $form.Add_FormClosing({ param($sender,$eventData) if ($script:busy) { $eventData.Cancel=$true } })
 try { [void]$form.ShowDialog() } finally { $form.Dispose() }

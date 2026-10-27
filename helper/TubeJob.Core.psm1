@@ -191,6 +191,23 @@ function Assert-TubeToolbarState {
     }
 }
 
+function Get-TubeOutputDirectory {
+    param($Job,[int]$PartIndex=0,[string]$SelectedFile='')
+    if ($null -eq $Job -or $PartIndex -lt 0 -or $PartIndex -ge $Job.Parts.Count) { throw 'Prepare a job and select a part first.' }
+    $prefix=[IO.Path]::GetFullPath($Job.Directory)+[IO.Path]::DirectorySeparatorChar
+    # When pairing a PDF with an already chosen TPC, start beside that TPC.
+    if ($SelectedFile -and (Test-Path -LiteralPath $SelectedFile -PathType Leaf) -and
+        [IO.Path]::GetFullPath($SelectedFile).StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)) {
+        return (Split-Path -Parent $SelectedFile)
+    }
+    $part=$Job.Parts[$PartIndex]
+    $inputPath=if ($part.TeoxPath) { $part.TeoxPath } else { $part.WorkingCopy }
+    if (-not [IO.Path]::GetFullPath($inputPath).StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)) { throw 'Part input is outside this helper job folder.' }
+    $directory=Split-Path -Parent $inputPath
+    if (-not (Test-Path -LiteralPath $directory -PathType Container)) { throw 'The part input folder no longer exists.' }
+    return $directory
+}
+
 function New-TubeJob {
     param([string]$Name, [string]$ParentDirectory, [object[]]$Parts, [decimal]$StockLengthInches)
     $null = Test-JobName $Name
@@ -211,7 +228,7 @@ function New-TubeJob {
     $runId = (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0,8)
     $directory = Join-Path $ParentDirectory ($Name + ' - ' + $runId)
     $null = New-Item -ItemType Directory -Path $directory
-    foreach ($child in @('originals','work','generated','deliverables','diagnostics')) {
+    foreach ($child in @('originals','work','deliverables','diagnostics')) {
         $null = New-Item -ItemType Directory -Path (Join-Path $directory $child)
     }
     $staged = New-Object 'System.Collections.Generic.List[object]'
@@ -346,4 +363,4 @@ Complete your usual TRUMPF simulation and operator release before production.
     return $completed
 }
 
-Export-ModuleMember -Function ConvertFrom-TrumpfCsv,Read-TrumpfTable,Get-TpcSummary,Test-JobName,Get-TubeDesignShortcutCandidates,Assert-TubeToolbarState,New-TubeJob,Save-TubeJob,Open-TubeJob,Test-TubePackage,Copy-CheckedPackage
+Export-ModuleMember -Function ConvertFrom-TrumpfCsv,Read-TrumpfTable,Get-TpcSummary,Test-JobName,Get-TubeDesignShortcutCandidates,Assert-TubeToolbarState,Get-TubeOutputDirectory,New-TubeJob,Save-TubeJob,Open-TubeJob,Test-TubePackage,Copy-CheckedPackage

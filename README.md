@@ -2,7 +2,7 @@
 
 A local Windows assistant for preparing TRUMPF tube-laser jobs and collecting the **Production Package PDF and nested TPC**. Built around the supplied Tube Design 17 / Programming Tube Auto Run 7.0.1 demonstration for TruLaser Tube 7000 (T12).
 
-**Version 0.1.2 is an assisted workflow, not unattended CAD-to-machine programming.** It does not require a TRUMPF API license. Its Import and Identify commands use ordinary visible Tube Design controls and still require a first test on the programming workstation. Auto Run, nesting, contour selection, and export remain guided operator actions in this release. No simulation, machine operation, network transfer, or USB copy is performed.
+**Version 0.1.3 is an assisted workflow, not unattended CAD-to-machine programming.** It does not require a TRUMPF API license. Its Import and Identify commands use ordinary visible Tube Design controls and still require a first test on the programming workstation. Auto Run, nesting, contour selection, and export remain guided operator actions in this release. No simulation, machine operation, network transfer, or USB copy is performed.
 
 ## First run
 
@@ -30,7 +30,7 @@ This addresses the observed missing-button lookup; live command behavior still n
 
 **Design and program** provides experimental **Import working copy** and **Identify profile** commands. You select/confirm the body, material, profile, dimensions, and direction. You assign and confirm cutting/marking contours. Save the SLDPRT and export a fresh, same-name TEOX into the part's working folder. Register that TEOX, open Auto Run, copy the TEOX path, and import it with the `+` button. Wait for calculation and inspect errors/warnings. Repeat for each part. One separately manufactured part per input CAD file is supported; multi-body assemblies need separate preparation.
 
-**Nest and check outputs** lists exact part quantities and the requested stock length. In Auto Run select those parts, enter nesting, set each part's Min./Max. quantities, keep the job multiplier/Amount at 1, and review compatible material/profile groupings. Set the exact job name, recalculate, review the nest, and export the final named TPC and Production Package PDF into this run's `generated` folder. Select those two files in the helper. Open and review the PDF, acknowledge the review, and choose **Check and collect package**.
+**Nest and check outputs** lists exact part quantities and the requested stock length. In Auto Run select those parts, enter nesting, set each part's Min./Max. quantities, keep the job multiplier/Amount at 1, and review compatible material/profile groupings. Set the exact job name, recalculate, review the nest, and keep TRUMPF's default of exporting the final named TPC and Production Package PDF beside the input TEOX. Select those two files directly from that input folder in the helper; no relocation is required. The pickers start beside the registered TEOX, and the PDF picker follows the selected TPC folder. Open and review the PDF, acknowledge the review, and choose **Check and collect package**.
 
 ## What the checks establish
 
@@ -63,3 +63,7 @@ pwsh -NoProfile -File tests/Test-Core.ps1 `
 The suite parses all helper PowerShell files and exercises the actual TPC/PDF pair, expected identities/quantities, rejected mismatches, malformed inputs, collection hashes, source preservation, isolated job staging, and resume validation. It does not launch Windows Forms or validate live TRUMPF behavior. See `VALIDATION.md` for the run result and remaining acceptance work.
 
 Each cloud task already has an isolated checkout. Use that checkout; do not create a Git worktree unless the user explicitly requests one.
+
+## Output locations in 0.1.3
+
+TRUMPF retains its normal save-beside-input behavior throughout the workflow. The helper no longer creates or directs exports into a separate generated folder. Export pickers follow the registered TEOX location (or the CAD working folder before registration). Existing job folders, including any legacy generated folder, remain compatible. New TPC/PDF files can be checked anywhere inside the current helper job; they need not be moved into a specific subfolder. Collection retains an additional checked pair in deliverables without moving or rewriting the native TRUMPF outputs.

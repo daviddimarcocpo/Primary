@@ -140,6 +140,14 @@ try {
     Save-TubeJob $staged
     $another=New-TubeJob 'Staging test [1]' $temp $spec 240
     Check ($another.Directory -cne $staged.Directory) 'Repeated job preparation uses separate folders'
+    Check ((Get-TubeOutputDirectory $another) -ceq (Split-Path -Parent $another.Parts[0].WorkingCopy)) 'Output picker defaults beside the working input before TEOX registration'
+    $exportFolder=Join-Path (Split-Path -Parent $another.Parts[0].WorkingCopy) 'native-exports'
+    $null=New-Item -ItemType Directory -Path $exportFolder
+    $another.Parts[0].TeoxPath=Join-Path $exportFolder 'Assembly Beam2.teox'
+    Check ((Get-TubeOutputDirectory $another) -ceq $exportFolder) 'Output picker follows the registered TEOX input folder'
+    $finalTpc=Join-Path $another.Directory 'sample.tpc'
+    Copy-Item -LiteralPath $ReferenceTpc -Destination $finalTpc
+    Check ((Get-TubeOutputDirectory $another 0 $finalTpc) -ceq $another.Directory) 'Matching PDF picker starts beside the chosen TPC'
     $spec+= $spec[0]
     Reject { New-TubeJob 'duplicate parts' $temp $spec 240 } 'Duplicate part names are rejected'
     $fraction=@([pscustomobject]@{PartName=$cadSource.BaseName;Quantity=1.5;SourcePath=$cadSource.FullName})
